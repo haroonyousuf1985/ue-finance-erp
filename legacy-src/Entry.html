@@ -1,0 +1,442 @@
+<!-- STAGE 1 -->
+<div id="tab-entry" class="tabpanel active">
+  <div class="card">
+    <h3>New Bill Entry <span class="pill Received">Received</span></h3>
+    <div class="row" style="align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="entryMode" value="single" checked onchange="onEntryModeChange()" style="width:auto;"> Single Entry</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="entryMode" value="bulk" onchange="onEntryModeChange()" style="width:auto;"> Bulk Upload (CSV) - multiple beneficiaries under one bill</label>
+    </div>
+
+    <!-- Stage 0 Diary linkage - mandatory for everyone except Admin. Filled
+         in automatically by clicking "Enter This Bill" from the Diary tab's
+         queue (see enterDiaryBill() in Scripts.html); Admin alone can tick
+         the bypass box below instead, which requires a reason and is logged
+         permanently on the bill (Entries.DiaryBypassReason). -->
+    <div id="dy_activeBanner" class="success" style="display:none;margin-bottom:10px;"></div>
+    <div class="row" id="dy_noDiaryMsg" style="align-items:center;">
+      <div class="error" style="margin:0;">No Diary Number attached yet - go to the Diary tab and click "Enter This Bill" on an item assigned to you.</div>
+    </div>
+    <div class="row" id="dy_adminBypassRow" style="display:none;align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_diaryBypass" onchange="onDiaryBypassChange()" style="width:auto;"> Admin bypass - enter this bill without a Diary Number</label>
+      <div class="field" id="e_diaryBypassReasonWrap" style="display:none;"><label>Reason (required, kept on the bill's audit record)</label><input type="text" id="e_diaryBypassReason"></div>
+    </div>
+
+    <div class="row">
+      <div class="field"><label>Received From (Office)</label><select id="e_receivingOffice"><option value="">-- select --</option></select></div>
+      <div class="field"><label>Pay From Account</label><select id="e_payFromAccount"><option value="">-- select --</option></select></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Entry Date</label><input type="date" id="e_date"></div>
+      <div class="field"><label>Financial Year</label><select id="e_fy" onchange="onCampusChange()"></select></div>
+      <div class="field"><label>Bill / Invoice No.</label><input type="text" id="e_billno"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Campus / Cost Centre</label><select id="e_campus" onchange="onCampusChange()"></select></div>
+    </div>
+    <div class="row" style="align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="headMode" value="single" checked onchange="onHeadModeChange()" style="width:auto;"> Single Budget Head</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="headMode" value="multi" onchange="onHeadModeChange()" style="width:auto;"> Multiple Budget Heads (one bill, several heads)</label>
+    </div>
+
+    <div id="singleHeadSection">
+    <div class="row">
+      <div class="field"><label>Budget Code</label><select id="e_headcode" onchange="onHeadChange()"></select></div>
+      <div class="field"><label>Budget Head Name (auto)</label><input type="text" id="e_headname" readonly></div>
+    </div>
+
+    <div class="balance-box" id="balanceBox" style="display:none;">
+      <div class="bal-allocated"><span class="label">Allocated</span><span class="val" id="bal_alloc">-</span></div>
+      <div class="bal-spent"><span class="label">Spent So Far</span><span class="val" id="bal_spent">-</span></div>
+      <div class="bal-remaining"><span class="label">Remaining</span><span class="val" id="bal_remain">-</span></div>
+      <div class="bal-spent"><span class="label">Spent After This Bill</span><span class="val" id="bal_spent_after">-</span></div>
+      <div class="bal-remaining"><span class="label">Balance After This Bill</span><span class="val" id="bal_remain_after">-</span></div>
+    </div>
+    </div>
+
+    <div id="multiHeadSection" style="display:none;">
+      <p style="font-size:12.5px;color:var(--text-muted);">Split this one bill's amount across several Budget Heads - it still moves through Processing, Passing and Payment as a single bill.</p>
+      <div class="table-wrap">
+        <table id="headSplitsTable">
+          <thead><tr><th>Budget Head</th><th>Amount</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <button type="button" class="secondary" onclick="addHeadSplitRow()">+ Add Head</button>
+      <div class="balance-box">
+        <div class="bal-allocated"><span class="label">Bill Amount</span><span class="val" id="ms_billamt">-</span></div>
+        <div class="bal-spent"><span class="label">Splits Total</span><span class="val" id="ms_splittotal">-</span></div>
+        <div class="bal-remaining"><span class="label">Difference</span><span class="val" id="ms_diff">-</span></div>
+      </div>
+    </div>
+
+    <div id="noAllocMsg" class="error" style="display:none;">No budget allocation set for this campus/budget code/year yet. Ask your Admin to set it up.</div>
+    <div id="noHeadsMsg" class="error" style="display:none;">This campus has no budget codes allocated for the selected Financial Year. Pick another year, or ask your Admin to add allocations for this one.</div>
+
+    <div id="singleEntrySection">
+    <hr>
+    <h3 style="margin-bottom:4px;">Payee</h3>
+    <div class="row" style="align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="payeeType" value="Vendor" checked onchange="onPayeeTypeChange()" style="width:auto;"> Vendor</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="payeeType" value="Employee" onchange="onPayeeTypeChange()" style="width:auto;"> UE Employee</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="payeeType" value="NonUEEmployee" onchange="onPayeeTypeChange()" style="width:auto;"> Non-UE Employee</label>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="payeeType" value="Student" onchange="onPayeeTypeChange()" style="width:auto;"> Student</label>
+    </div>
+
+    <div id="vendorFields" class="row">
+      <div class="field" style="position:relative;">
+        <label>Vendor Name</label>
+        <input type="text" id="e_vendor" oninput="onVendorInput()" autocomplete="off">
+        <div id="vendorSuggestions" class="vendor-suggestions" style="display:none; position:absolute; width:100%; z-index:10;"></div>
+      </div>
+      <div class="field"><label>CNIC / NTN</label><input type="text" id="e_cnic" onblur="onCnicBlur()" maxlength="15" placeholder="35201-1222334-4 or 12345678"></div>
+      <div class="field"><label>IBAN</label><input type="text" id="e_iban"></div>
+      <div class="field"><label>Bank Name</label><input type="text" id="e_bank"></div>
+    </div>
+
+    <div id="employeeFields" style="display:none;">
+      <div class="row">
+        <div class="field"><label>Employee ID</label><input type="text" id="e_employeeid" oninput="onEmployeeIdInput()" autocomplete="off"></div>
+        <div class="field"><label>Name (auto)</label><input type="text" id="e_empname" readonly></div>
+        <div class="field"><label>Designation (auto)</label><input type="text" id="e_empdesignation" readonly></div>
+        <div class="field"><label>CNIC (auto)</label><input type="text" id="e_empcnic" readonly></div>
+        <div class="field"><label>IBAN (auto)</label><input type="text" id="e_empiban" readonly></div>
+        <div class="field"><label>Bank (auto)</label><input type="text" id="e_empbank" readonly></div>
+      </div>
+      <div id="employeeNotFound" class="error" style="display:none;">Employee ID not found - ask your Admin to add this employee (Admin &gt; Employees).</div>
+    </div>
+
+    <div id="nonUEFields" class="row" style="display:none;">
+      <div class="field"><label>CNIC</label><input type="text" id="e_nonue_cnic" oninput="onNonUECnicInput()" autocomplete="off" maxlength="15" placeholder="35201-1222334-4"></div>
+      <div class="field"><label>Name</label><input type="text" id="e_nonue_name"></div>
+      <div class="field"><label>IBAN</label><input type="text" id="e_nonue_iban"></div>
+      <div class="field"><label>Bank Name</label><input type="text" id="e_nonue_bank"></div>
+    </div>
+
+    <div id="studentFields" style="display:none;">
+      <div class="row">
+        <div class="field"><label>Student ID / Form Number</label><input type="text" id="e_studentid" oninput="onStudentIdInput()" autocomplete="off"></div>
+        <div class="field"><label>Program</label><input type="text" id="e_program"></div>
+        <div class="field"><label>Session</label><input type="text" id="e_session" placeholder="e.g. 2023-2027"></div>
+        <div class="field"><label>Shift</label><select id="e_shift"><option value="Morning">Morning</option><option value="Evening">Evening</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Beneficiary's CNIC</label><input type="text" id="e_studentcnic" maxlength="15" placeholder="35201-1222334-4"></div>
+        <div class="field"><label>Beneficiary's Account Title</label><input type="text" id="e_beneficiaryTitle"></div>
+        <div class="field"><label>Beneficiary's IBAN</label><input type="text" id="e_beneficiaryIban"></div>
+      </div>
+    </div>
+
+
+    <!-- Shared Section 149 income disclosure - only shown for UE/Non-UE
+         Employee on a taxable (Section 149) Nature of Bill. UE Employees see
+         a READ-ONLY figure (only Admin can set/change it, at Admin > Employees);
+         Non-UE Employees self-disclose it here since they have no separate
+         Admin onboarding step. -->
+    <div id="incomeProfileSection" class="card" style="display:none;background:#0B1220;">
+      <h3 style="font-size:13px;margin-top:0;">Annual Taxable Income (for Section 149)</h3>
+      <div id="nonUEAffidavitRow" class="row" style="display:none;align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_affidavit" onchange="onAffidavitChange()" style="width:auto;"> Affidavit of Low Income provided (Zero Tax under Section 149)</label>
+      </div>
+      <div class="row" id="ueAnnualIncomeRow" style="display:none;">
+        <div class="field"><label>Annual Taxable Income on file (set by Admin)</label><input type="number" id="e_annualIncomeUE" readonly></div>
+      </div>
+      <div class="row" id="annualIncomeRow">
+        <div class="field"><label>Annual Taxable Income (FY, reported once)</label><input type="number" id="e_annualIncome" oninput="updateTaxPreview()"></div>
+        <div class="field" style="align-self:flex-end;"><button type="button" class="secondary" onclick="saveIncomeProfileForm()">Save Income Profile</button></div>
+      </div>
+      <div class="balance-box">
+        <div class="bal-allocated"><span class="label">Already Claimed This Year</span><span class="val" id="ip_claimed">-</span></div>
+        <div class="bal-spent"><span class="label">Income Before This Bill</span><span class="val" id="ip_before">-</span></div>
+        <div class="bal-remaining"><span class="label">Income After This Bill</span><span class="val" id="ip_after">-</span></div>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field"><label>Amount (Gross)</label><input type="number" id="e_amount" oninput="onAmountInput()"></div>
+      <div class="field field-wide"><label>Bill Description * (max 40 characters)</label><input type="text" id="e_billdesc" required maxlength="40"></div>
+    </div>
+
+    <div id="releaseSecurityInfo" class="balance-box" style="display:none;">
+      <div class="bal-allocated"><span class="label">Security Currently Held</span><span class="val" id="rs_held">-</span></div>
+      <div class="bal-spent"><span class="label">Release Amount (Gross above)</span><span class="val" id="rs_release">-</span></div>
+      <div class="bal-remaining"><span class="label">Balance After Release</span><span class="val" id="rs_after">-</span></div>
+    </div>
+
+    <hr>
+    <h3 style="margin-bottom:4px;">Deductions</h3>
+    <div class="row">
+      <div class="field">
+        <label>Nature of Bill</label>
+        <select id="e_billnature" onchange="onBillNatureChange()"></select>
+      </div>
+      <div class="field" id="e_refundCategoryWrap" style="display:none;">
+        <label>Refund Category</label>
+        <select id="e_refundcategory" onchange="onRefundCategoryChange()">
+          <option value="Library Security">Library Security</option>
+          <option value="Subject Repeat Fee">Subject Repeat Fee</option>
+          <option value="Dropped Student">Dropped Student</option>
+          <option value="Extra Deposited">Extra Deposited</option>
+          <option value="Admission Withdrawal">Admission Withdrawal</option>
+          <option value="Admission to Other Campus">Admission to Other Campus</option>
+          <option value="Discontinued Program">Discontinued Program</option>
+          <option value="__other__">Other (Manually Enter)</option>
+        </select>
+      </div>
+      <div class="field" id="e_refundCategoryOtherWrap" style="display:none;">
+        <label>Enter Refund Category</label>
+        <input type="text" id="e_refundcategory_other" oninput="updateTaxPreview()" placeholder="Type the category">
+      </div>
+      <div class="field" id="e_thesisClassWrap" style="display:none;">
+        <label>Class</label>
+        <input type="text" id="e_thesisClass" oninput="updateTaxPreview()">
+      </div>
+      <div class="field" id="e_thesisStudentNameWrap" style="display:none;">
+        <label>Student Name</label>
+        <input type="text" id="e_thesisStudentName" oninput="updateTaxPreview()">
+      </div>
+    </div>
+    <div class="row" id="e_visitingFieldsWrap" style="display:none;">
+      <div class="field"><label>Program</label><input type="text" id="e_visitingProgram" oninput="updateTaxPreview()"></div>
+      <div class="field"><label>Subject</label><input type="text" id="e_visitingSubject" oninput="updateTaxPreview()"></div>
+      <div class="field"><label>Cr. Hrs.</label><input type="number" step="0.5" id="e_visitingCrHrs" oninput="updateTaxPreview()"></div>
+      <div class="field"><label>Rate</label><input type="number" id="e_visitingRate" oninput="updateTaxPreview()"></div>
+      <div class="field"><label>Lectures</label><input type="number" id="e_visitingLectures" oninput="updateTaxPreview()"></div>
+    </div>
+    <div class="row">
+      <div class="field" id="e_benevolentSubWrap" style="display:none;">
+        <label>Benevolent Fund - Sub-category</label>
+        <select id="e_benevolentSub" onchange="updateTaxPreview()">
+          <option value="Marriage Grant">Marriage Grant</option>
+          <option value="Funeral Grant">Funeral Grant</option>
+          <option value="Education Scholarship">Education Scholarship</option>
+          <option value="Employees Fee Reimbursement">Employees Fee Reimbursement</option>
+          <option value="Farewell Grant">Farewell Grant</option>
+          <option value="Monthly Grant">Monthly Grant</option>
+        </select>
+      </div>
+      <div class="field" id="e_nonueTaxMethodWrap" style="display:none;">
+        <label>Non-UE Tax Deduction Method</label>
+        <select id="e_nonueTaxMethod" onchange="onBillNatureChange()">
+          <option value="Section149">Section 149 (Slab, per Income Profile)</option>
+          <option value="Section153_1b">Section 153(1)(b) - Services (Individual/AOP) - 15%/30%</option>
+        </select>
+      </div>
+      <div class="field" id="e_taxpayerTypeWrap">
+        <label>Taxpayer Type</label>
+        <select id="e_taxpayertype" onchange="updateTaxPreview()">
+          <option value="Individual/AOP" selected>Individual / AOP</option>
+          <option value="Company">Company</option>
+        </select>
+      </div>
+      <div class="field" id="e_serviceCategoryWrap" style="display:none;">
+        <label>Service Category</label>
+        <select id="e_servicecategory" onchange="updateTaxPreview()"></select>
+      </div>
+      <div class="field" id="e_examSubCategoryWrap" style="display:none;">
+        <label>Conduct of Exam - Sub-category</label>
+        <input type="text" id="e_examSubCategory" oninput="updateTaxPreview()" placeholder="Enter the specific exam/duty">
+      </div>
+    </div>
+    <div id="taxStatusRow" class="row">
+      <div class="field">
+        <label>FBR Status (Income Tax / Sales Tax)</label>
+        <select id="e_fbrstatus" onchange="updateTaxPreview()">
+          <option value="Filer">Active Taxpayer / Filer</option>
+          <option value="NonFiler">Inactive / Non-Filer</option>
+        </select>
+      </div>
+      <div class="field" id="e_praStatusWrap">
+        <label>PRA Status (Punjab Sales Tax)</label>
+        <select id="e_prastatus" onchange="updateTaxPreview()">
+          <option value="Active">Active Taxpayer</option>
+          <option value="Inactive">Inactive Taxpayer</option>
+        </select>
+      </div>
+    </div>
+    <div id="taxCheckRow" class="row" style="align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;flex:1;"><input type="checkbox" id="e_applyIT" checked onchange="updateTaxPreview()" style="width:auto;"> Deduct Income Tax</label>
+      <label id="stCheckLabel" style="display:flex;align-items:center;gap:6px;font-weight:normal;flex:1;"><input type="checkbox" id="e_applyST" onchange="onSalesTaxCheckChange()" style="width:auto;"> Deduct Sales Tax (Goods)</label>
+      <label id="pstCheckLabel" style="display:flex;align-items:center;gap:6px;font-weight:normal;flex:1;"><input type="checkbox" id="e_applyPST" onchange="onPSTCheckChange()" style="width:auto;"> Deduct Punjab Sales Tax (Services)</label>
+    </div>
+    <div class="row" id="pstInvoiceRow" style="display:none;">
+      <div class="field"><label>Invoice Number</label><input type="text" id="e_pstInvoiceNo"></div>
+      <div class="field"><label>Vendor's Invoice Date</label><input type="date" id="e_vendorInvoiceDate"></div>
+    </div>
+
+    <!-- Execution of Contract: the Punjab Sales Tax rate depends on which of
+         these two categories the contract is - Income Tax for Contract bills
+         uses the normal Company/Individual x Filer/Non-Filer matrix above. -->
+    <div class="row" id="contractRateRow" style="display:none;">
+      <div class="field">
+        <label>Contract Category (Punjab Sales Tax rate)</label>
+        <select id="e_contractCategory" onchange="updateTaxPreview()">
+          <option value="NewProjects">New Projects</option>
+          <option value="RepairRenovation">Repair / Renovation</option>
+        </select>
+        <small style="color:var(--text-muted);">Rate for each is set in Admin &gt; Tax Settings.</small>
+      </div>
+    </div>
+
+    <!-- Manual Income Tax override - available for any bill. When on, the
+         auto-calculated Income Tax section/rate/amount above is replaced
+         with whatever is entered here (rate OR amount, whichever is filled). -->
+    <div class="row" style="align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_manualTaxOverride" onchange="toggleDeductionRow('manualTax');updateTaxPreview()" style="width:auto;"> Manually Enter Income Tax</label>
+      <div class="field"><label>Section</label><input type="text" id="e_manualTaxSection" disabled oninput="updateTaxPreview()" placeholder="e.g. 153(1)(b)"></div>
+      <div class="field" style="max-width:110px;">
+        <label>Mode</label>
+        <select id="e_manualTaxModeSel" disabled onchange="onDeductionModeChange('manualTax')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+      </div>
+      <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_manualTaxRate" disabled oninput="updateTaxPreview()"></div>
+      <div class="field" id="e_manualTaxAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_manualTaxAmountInput" disabled oninput="updateTaxPreview()"></div>
+    </div>
+
+    <!-- Manual Sales Tax override - only relevant once "Deduct Sales Tax" above is ticked. -->
+    <div class="row" id="manualSalesTaxRow" style="align-items:center;display:none;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_manualSalesTaxOverride" onchange="toggleDeductionRow('manualSalesTax');updateTaxPreview()" style="width:auto;"> Manually Enter Sales Tax</label>
+      <div class="field" style="max-width:110px;">
+        <label>Mode</label>
+        <select id="e_salesTaxModeSel" disabled onchange="onDeductionModeChange('manualSalesTax')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+      </div>
+      <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_salesTaxManualRate" disabled oninput="updateTaxPreview()"></div>
+      <div class="field" id="e_salesTaxManualAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_salesTaxManualAmountInput" disabled oninput="updateTaxPreview()"></div>
+    </div>
+
+    <!-- Manual Punjab Sales Tax override - only relevant once "Deduct Punjab Sales Tax" above is ticked. -->
+    <div class="row" id="manualPSTRow" style="align-items:center;display:none;">
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_manualPSTOverride" onchange="toggleDeductionRow('manualPST');updateTaxPreview()" style="width:auto;"> Manually Enter Punjab Sales Tax</label>
+      <div class="field" style="max-width:110px;">
+        <label>Mode</label>
+        <select id="e_pstModeSel" disabled onchange="onDeductionModeChange('manualPST')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+      </div>
+      <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_pstManualRate" disabled oninput="updateTaxPreview()"></div>
+      <div class="field" id="e_pstManualAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_pstManualAmountInput" disabled oninput="updateTaxPreview()"></div>
+    </div>
+
+    <!-- Vendor/Employee: three independent deductions, each entered as % OR a direct amount -->
+    <div id="otherDeductionsSection">
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_applySecurity" onchange="toggleDeductionRow('security');updateTaxPreview()" style="width:auto;"> Security</label>
+        <div class="field"><label>Basis / Section</label><input type="text" id="e_securityBasis" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" style="max-width:110px;">
+          <label>Mode</label>
+          <select id="e_securityModeSel" disabled onchange="onDeductionModeChange('security')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+        </div>
+        <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_securityRate" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" id="e_securityAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_securityAmountInput" disabled oninput="updateTaxPreview()"></div>
+      </div>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_applyPenalty" onchange="toggleDeductionRow('penalty');updateTaxPreview()" style="width:auto;"> Penalty</label>
+        <div class="field"><label>Basis / Section</label><input type="text" id="e_penaltyBasis" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" style="max-width:110px;">
+          <label>Mode</label>
+          <select id="e_penaltyModeSel" disabled onchange="onDeductionModeChange('penalty')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+        </div>
+        <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_penaltyRate" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" id="e_penaltyAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_penaltyAmountInput" disabled oninput="updateTaxPreview()"></div>
+      </div>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_applyOther" onchange="toggleDeductionRow('other');updateTaxPreview()" style="width:auto;"> Other Deduction</label>
+        <div class="field"><label>Category</label><input type="text" id="e_otherCategory" disabled oninput="updateTaxPreview()"></div>
+        <div class="field"><label>Basis</label><input type="text" id="e_otherBasis" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" style="max-width:110px;">
+          <label>Mode</label>
+          <select id="e_otherModeSel" disabled onchange="onDeductionModeChange('other')"><option value="rate">By %</option><option value="amount">By Amount</option></select>
+        </div>
+        <div class="field"><label>Rate %</label><input type="number" step="0.01" id="e_otherRate" disabled oninput="updateTaxPreview()"></div>
+        <div class="field" id="e_otherAmountWrap" style="display:none;"><label>Amount</label><input type="number" id="e_otherAmountInput" disabled oninput="updateTaxPreview()"></div>
+      </div>
+    </div>
+
+    <!-- Student: exactly one deduction line, amount specified directly -->
+    <div id="studentDeductionSection" style="display:none;">
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="e_applyStudentDeduction" onchange="toggleDeductionRow('studentDeduction');updateTaxPreview()" style="width:auto;"> Deduction</label>
+        <div class="field"><label>Category</label><input type="text" id="e_studentDeductionCategory" disabled oninput="updateTaxPreview()"></div>
+        <div class="field"><label>Basis</label><input type="text" id="e_studentDeductionBasis" disabled oninput="updateTaxPreview()"></div>
+        <div class="field"><label>Amount</label><input type="number" id="e_studentDeductionAmount" disabled oninput="updateTaxPreview()"></div>
+      </div>
+    </div>
+
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="taxPreviewTable">
+        <thead><tr><th></th><th>Section / Basis</th><th>Rate</th><th>Amount</th></tr></thead>
+        <tbody>
+          <tr><td>Income Tax</td><td id="tp_itsection">-</td><td id="tp_itrate">-</td><td id="tp_itamt">0</td></tr>
+          <tr><td>Sales Tax</td><td>-</td><td id="tp_strate">-</td><td id="tp_stamt">0</td></tr>
+          <tr><td>Punjab Sales Tax<span id="tp_pstcategory" style="color:var(--text-muted);font-weight:normal;"></span></td><td>-</td><td id="tp_pstrate">-</td><td id="tp_pstamt">0</td></tr>
+          <tr><td>Security</td><td>-</td><td id="tp_secrate">-</td><td id="tp_secamt">0</td></tr>
+          <tr><td>Penalty</td><td>-</td><td id="tp_penrate">-</td><td id="tp_penamt">0</td></tr>
+          <tr><td>Other Deduction</td><td>-</td><td id="tp_othrate">-</td><td id="tp_othamt">0</td></tr>
+          <tr><td>Student Deduction</td><td>-</td><td>-</td><td id="tp_studamt">0</td></tr>
+        </tbody>
+        <tfoot><tr><td colspan="3">Net Payable</td><td id="tp_net">0</td></tr></tfoot>
+      </table>
+    </div>
+
+    <button class="primary" id="btnSubmitEntry" onclick="submitEntryForm()" style="margin-top:12px;">Save Entry</button>
+    </div>
+
+    <div id="bulkEntrySection" style="display:none;">
+      <hr>
+      <h3 style="margin-bottom:4px;">Bulk Upload - Multiple Beneficiaries Under One Bill</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Use this when one bill covers many people at once (e.g. a salary/scholarship voucher). This becomes
+        <b>one single bill</b> through Processing, Passing and Payment with the total consolidated amount - the
+        IBFT report, when generated, pays every beneficiary listed below individually.
+      </p>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="bulkType" value="Vendor" checked onchange="onBulkTypeChange()" style="width:auto;"> Vendor Bulk</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="bulkType" value="Student" onchange="onBulkTypeChange()" style="width:auto;"> Student Bulk</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="bulkType" value="Employee" onchange="onBulkTypeChange()" style="width:auto;"> Employee Bulk (UE + Non-UE)</label>
+      </div>
+      <p id="bulkTypeHint" style="font-size:12.5px;color:var(--text-muted);"></p>
+      <div class="row">
+        <div class="field"><label>Bill Description (whole bill) * (max 40 characters)</label><input type="text" id="bulk_billdesc" required maxlength="40"></div>
+        <div class="field" style="align-self:flex-end;">
+          <button class="secondary" onclick="downloadBulkTemplate()">Download CSV Template</button>
+        </div>
+      </div>
+      <div class="card" id="bulkDiaryPicker" style="margin:10px 0;">
+        <h3 style="font-size:13px;margin-top:0;">Diary Numbers covered by this bulk bill</h3>
+        <p style="font-size:12.5px;color:var(--text-muted);">
+          One bulk bill (one Bill ID) can cover several Diary numbers - they share this cost centre and budget head. Tick every
+          Diary bill assigned to you that belongs in this upload. The one you opened with "Enter This Bill" is always included.
+        </p>
+        <div id="bulkDiaryTotals" style="font-size:13px;margin-bottom:8px;"></div>
+        <div class="table-wrap" style="max-height:240px;overflow-y:auto;">
+          <table id="bulkDiaryTable">
+            <thead><tr><th></th><th>Diary No.</th><th>Type</th><th>Sender</th><th>Description</th><th class="num">Diary Amount</th></tr></thead>
+            <tbody id="bulkDiaryPickerBody"><tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row" id="bulkPstInvoiceRow" style="display:none;">
+        <div class="field"><label>PST Invoice Number (required if any row has Punjab Sales Tax)</label><input type="text" id="bulk_pstInvoiceNo"></div>
+        <div class="field"><label>Vendor's Invoice Date</label><input type="date" id="bulk_vendorInvoiceDate"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Upload CSV</label><input type="file" id="bulk_file" accept=".csv" onchange="onBulkFileSelected(event)"></div>
+      </div>
+      <div id="bulkErrors" class="error" style="display:none;"></div>
+
+      <div id="bulkPreviewWrap" style="display:none;">
+        <div class="balance-box">
+          <div class="bal-allocated"><span class="label">Beneficiaries</span><span class="val" id="bulk_count">-</span></div>
+          <div class="bal-spent"><span class="label">Gross Total</span><span class="val" id="bulk_gross">-</span></div>
+          <div class="bal-remaining"><span class="label">Net Total</span><span class="val" id="bulk_net">-</span></div>
+          <div class="bal-spent"><span class="label">Spent After This Bill</span><span class="val" id="bulk_spent_after">-</span></div>
+          <div class="bal-remaining"><span class="label">Balance After This Bill</span><span class="val" id="bulk_remain_after">-</span></div>
+        </div>
+        <div class="table-wrap">
+          <table id="bulkPreviewTable">
+            <thead><tr><th>#</th><th>Payee Type</th><th>ID</th><th>Name</th><th>CNIC</th><th>IBAN</th><th>Amount</th>
+              <th>Income Tax</th><th>Sales Tax</th><th>PST</th><th>Security</th><th>Penalty</th><th>Other</th><th>Net</th><th>Description</th><th>Office / Account</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <button class="primary" id="btnSubmitBulk" onclick="submitBulkEntryForm()" style="margin-top:12px;">Submit Bulk Bill</button>
+      </div>
+    </div>
+  </div>
+</div>

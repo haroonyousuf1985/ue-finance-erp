@@ -1,0 +1,305 @@
+<!-- STAGE 0 - DIARY / RECEIVING
+     #dy_clerkSection - Diary Clerk (and Admin): log items, browse Pending Diary Items,
+       and the two landing lists: Returned / On Hold, and Sent to Other Offices.
+       ONLY the Diary Clerk/Admin can re-assign and resume those.
+     #dy_userSection  - everyone else (and Admin): own position + queue. An item the
+       user returned or sent to an office stays visible to them VIEW-ONLY. -->
+<div id="tab-diary" class="tabpanel">
+  <nav class="subtabs no-print" id="dy_subnav"></nav>
+
+  <!-- ================= DIARY CLERK WORKSPACE ================= -->
+  <div id="dy_clerkSection" style="display:none;">
+    <div class="card dysub" id="dysub-log">
+      <h3>Log a New Bill or Letter <span class="pill Received">Stage 0</span></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Record that something physically arrived and assign it to whoever should act on it. A Bill then follows the
+        normal Entry &rarr; Processing &rarr; Passing &rarr; Payment pipeline; a Letter instead moves person to person
+        until someone closes or files it.
+      </p>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="dyItemType" value="Bill" checked onchange="onDyItemTypeChange()" style="width:auto;"> Bill</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="dyItemType" value="Letter" onchange="onDyItemTypeChange()" style="width:auto;"> Letter</label>
+      </div>
+      <div class="row" id="dy_billFields">
+        <div class="field" style="max-width:240px;"><label>Amount (Gross) *</label><input type="number" id="dy_amount" min="1" placeholder="Amount on the bill"></div>
+        <div class="field">
+          <label>Bill Type *</label>
+          <div style="display:flex;gap:18px;align-items:center;padding-top:8px;">
+            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="dyBillType" value="Single" style="width:auto;"> Single bill</label>
+            <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="dyBillType" value="Bulk" style="width:auto;"> Bulk bill (multiple beneficiaries)</label>
+          </div>
+        </div>
+      </div>
+      <div class="row" id="dy_letterFields" style="display:none;">
+        <div class="field"><label>Attach the Letter (PDF or JPEG, max 5 MB - optional)</label><input type="file" id="dy_file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Date Received</label><input type="date" id="dy_date"></div>
+        <div class="field"><label>Sender's Diary / Letter Date</label><input type="date" id="dy_senderDate" title="The date on the sender's own dispatch/diary, if shown on it"></div>
+        <div class="field">
+          <label>Sender Is</label>
+          <select id="dy_senderType" onchange="onDySenderTypeChange()">
+            <option value="Vendor">Vendor</option>
+            <option value="Employee">UE Employee</option>
+            <option value="NonUEEmployee">Non-UE Employee</option>
+            <option value="Office">Another Office</option>
+          </select>
+        </div>
+        <div class="field" id="dy_vendorWrap"><label>Vendor Name</label><input type="text" id="dy_vendorName"></div>
+        <div class="field" id="dy_employeeWrap" style="display:none;"><label>Employee ID</label><input type="text" id="dy_employeeId"></div>
+        <div class="field" id="dy_nonueWrap" style="display:none;"><label>Non-UE Employee Name</label><input type="text" id="dy_nonueName"></div>
+        <div class="field" id="dy_nonueCnicWrap" style="display:none;"><label>Non-UE Employee CNIC</label><input type="text" id="dy_nonueCnic" placeholder="35201-1222334-4"></div>
+        <div class="field" id="dy_officeWrap" style="display:none;"><label>Sender Office Name</label><input type="text" id="dy_senderOfficeName"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Reference / Diary No. of the Sender</label><input type="text" id="dy_senderRef" placeholder="Their own dispatch/diary number, if any"></div>
+        <div class="field">
+          <label>Originating Office</label>
+          <select id="dy_originatingOffice" onchange="onDyOriginatingOfficeChange()"><option value="">-- select --</option></select>
+        </div>
+        <div class="field" id="dy_originatingOtherWrap" style="display:none;"><label>Originating Office Name</label><input type="text" id="dy_originatingOther"></div>
+        <div class="field"><label>Description</label><input type="text" id="dy_desc" placeholder="e.g. Electricity bill, Request for leave"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Assign To</label><select id="dy_assignee"><option value="">-- select --</option></select></div>
+        <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLogDiary" onclick="submitDiaryEntry()">Log &amp; Assign</button></div>
+      </div>
+      <div id="dy_lastId" style="font-size:13px;color:var(--accent);font-weight:700;"></div>
+    </div>
+
+    <div class="card dysub" id="dysub-pending">
+      <h3>Pending Diary Items</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Shows items still open (not yet paid-and-confirmed / closed), waiting more than 10 days by default - untick
+        below to see everything. Only its current holder can move a Bill/Letter onward, but the "Admin Reassign"
+        button on each row lets Admin re-route any open item with the full trail preserved. Returned / sent-out items are resumed only from the two sections below (Diary Clerk/Admin).
+      </p>
+      <div class="row">
+        <div class="field" style="max-width:220px;"><label>Select User</label><select id="dy_pendingUser"><option value="">-- All Users --</option></select></div>
+        <div class="field"><label>Originating Office</label><select id="dy_pendingOffice"><option value="">All Offices</option></select></div>
+        <div class="field"><label>Vendor/Employee/Diary No. contains</label><input type="text" id="dy_pendingQuery"></div>
+        <div class="field" style="align-self:flex-end;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="dy_only10days" checked style="width:auto;"> Only &gt; 10 days waiting</label>
+        </div>
+        <div class="field" style="align-self:flex-end;"><button class="primary" onclick="loadPendingDiaryItems()">Load</button></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Employee ID contains</label><input type="text" id="dy_pendingEmpId"></div>
+        <div class="field"><label>Description contains</label><input type="text" id="dy_pendingDesc"></div>
+        <div class="field"><label>Amount contains</label><input type="text" id="dy_pendingAmount"></div>
+        <div class="field" style="align-self:flex-end;">
+          <button class="secondary" onclick="togglePendingColumnPicker()">Columns</button>
+          <button class="primary" onclick="loadPendingDiaryItems()">Load</button>
+        </div>
+      </div>
+      <div id="pd_colPicker" style="display:none;margin-bottom:10px;">
+        <label>Columns to show (remembered in this browser)
+          <button class="secondary" style="padding:2px 10px;min-height:0;margin-left:8px;" onclick="resetPendingColumns()">Reset to default</button></label>
+        <div class="checklist" id="pd_columns"></div>
+      </div>
+      <div id="pd_count" style="font-size:12px;color:var(--text-muted);"></div>
+
+      <div id="dy_userSummaryBox" style="display:none;margin-top:10px;">
+        <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Selected User's Position (Stages 0-7)</h4>
+        <div class="balance-box" id="dy_stageSummaryBoxes"></div>
+        <div class="row" style="margin-top:10px;">
+          <div class="field" style="max-width:260px;">
+            <label>Download Which Stage</label>
+            <select id="dy_exportStage">
+              <option value="">All Stages</option>
+              <option value="0">0 - Diary Pending</option>
+              <option value="1">1 - Processing</option>
+              <option value="2">2 - Passing</option>
+              <option value="3">3 - Payment/IBFT</option>
+              <option value="4">4 - Confirmation</option>
+              <option value="5">5 - Reconciliation</option>
+              <option value="6">6 - Paid / Completed</option>
+              <option value="7">7 - Returned / On Hold</option>
+            </select>
+          </div>
+          <div class="field" style="align-self:flex-end;">
+            <button class="secondary" onclick="downloadDiaryUserSummary('csv')">Download CSV</button>
+            <button class="secondary" onclick="downloadDiaryUserSummary('pdf')">Download PDF</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="margin-top:10px;">
+        <table id="pendingDiaryTable">
+          <thead><tr id="pdHeadRow"></tr></thead>
+          <tbody><tr><td colspan="12" style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card dysub" id="dysub-held">
+      <h3>Returned / On Hold Bills <span class="pill Cancelled">Needs Correction Before Resuming</span></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Everything a user has returned - before a Bill ID exists (Diary stage) or at Processing/Passing stage. Whoever
+        returned it keeps a view-only record. Only you (Diary Clerk/Admin) can re-assign it to the relevant person and
+        resume it: a bill continues exactly at the stage it left, nothing is re-entered.
+      </p>
+      <button class="secondary" onclick="loadHeldItems()">Load</button>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table id="onHoldTable">
+          <thead><tr><th>DN / Bill ID</th><th>Type</th><th>Stage</th><th>Reason</th><th>Returned By</th><th>Date</th><th>Sender / Description</th><th></th></tr></thead>
+          <tbody><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Click Load.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card dysub" id="dysub-sent">
+      <h3>Items Sent to Other Offices <span class="pill Received">Awaiting Re-assignment</span></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Items a user sent to another office. Whoever sent it keeps a view-only record (a sent bill is held out of
+        Processing/Passing). When it comes back, re-assign it here to the relevant person to resume it.
+      </p>
+      <button class="secondary" onclick="loadHeldItems()">Load</button>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table id="sentOfficeTable">
+          <thead><tr><th>DN / Bill ID</th><th>Type</th><th>Sender</th><th>Sent To Office</th><th>Purpose</th><th>Sent By</th><th>Date</th><th></th></tr></thead>
+          <tbody><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Click Load.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= USER WORKSPACE ================= -->
+  <div id="dy_userSection" style="display:none;">
+    <div class="card dysub" id="dysub-mypos">
+      <h3>My Diary Position</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">Everything currently assigned to you, stage by stage.</p>
+      <div class="balance-box" id="dy_myStageBoxes"></div>
+    </div>
+
+    <div class="card dysub" id="dysub-myqueue">
+      <h3>My Diary Queue <button class="secondary" onclick="loadMyDiaryQueue()">Refresh</button></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Items you returned or sent to another office stay here as view-only until the Diary Clerk/Admin re-assigns them.
+      </p>
+      <div class="row">
+        <div class="field"><label>Originating Office</label><select id="dy_myOffice"><option value="">All Offices</option></select></div>
+        <div class="field"><label>Vendor/Employee/Diary No. contains</label><input type="text" id="dy_myQuery"></div>
+        <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadMyDiaryQueue()">Filter</button></div>
+      </div>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table id="myDiaryQueueTable">
+          <thead><tr><th>DN / Bill / Letter No.</th><th>Type</th><th>Date Received</th><th>Days at Stage</th><th>Days Since Arrival</th><th>Sender</th><th>Description</th><th>Amount</th><th>Originating Office</th><th>Stage</th><th></th></tr></thead>
+          <tbody><tr><td colspan="11" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= RE-ASSIGN & RESUME (Diary Clerk / Admin) ================= -->
+  <div id="resumeModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:106; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:640px; width:100%; margin:0;">
+      <h3 style="margin-top:0;">Re-assign &amp; Resume <span id="rm_itemId" style="color:var(--accent);"></span></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">It resumes exactly where it left off, with the person you pick here.</p>
+      <div class="field" id="rm_userWrap"><label>Assign To</label><select id="rm_user"><option value="">-- select --</option></select></div>
+      <div class="field"><label>Note (optional)</label><textarea id="rm_note" rows="4" style="width:100%;min-height:90px;max-width:100%;resize:both;"></textarea></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="submitResume()">Re-assign &amp; Resume</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('resumeModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= UNIVERSAL REASSIGN MODAL (current holder, before Payment/IBFT) ================= -->
+  <div id="reassignModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:106; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:640px; width:100%; margin:0;">
+      <h3 style="margin-top:0;">Reassign <span id="ra_itemId" style="color:var(--accent);"></span></h3>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="raTargetType" value="user" checked onchange="onReassignTargetChange()" style="width:auto;"> A User</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="raTargetType" value="office" onchange="onReassignTargetChange()" style="width:auto;"> Another Office</label>
+      </div>
+      <div class="field" id="ra_userWrap"><label>Reassign To</label><select id="ra_targetUser"><option value="">-- select --</option></select></div>
+      <div class="field" id="ra_officeWrap" style="display:none;"><label>Office Name</label><input type="text" id="ra_targetOffice"></div>
+      <p id="ra_officeNote" style="display:none;font-size:12px;color:var(--amber);">Sending to another office holds the item - you keep a view-only record, and only the Diary Clerk/Admin can re-assign and resume it.</p>
+      <div class="field"><label>Purpose / Reason</label><textarea id="ra_purpose" rows="5" style="width:100%;min-height:110px;max-width:100%;resize:both;"></textarea></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="submitReassign()">Reassign</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('reassignModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= RETURN A BILL AT PROCESSING/PASSING STAGE ================= -->
+  <div id="billOnHoldReturnModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:106; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:640px; width:100%; margin:0;">
+      <h3 style="margin-top:0;">Return Bill <span id="bor_billId" style="color:var(--accent);"></span> for Correction</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">You keep a view-only record. The Diary Clerk/Admin will re-assign and resume it.</p>
+      <div class="field"><label>Objection / Reason</label><textarea id="bor_objection" rows="6" style="width:100%;min-height:140px;max-width:100%;resize:both;"></textarea></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="submitBillOnHoldReturn()">Return</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('billOnHoldReturnModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= LETTER PROCESSING MODAL ================= -->
+  <div id="letterActionModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:105; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:920px; width:100%; margin:0; max-height:92vh; overflow-y:auto;">
+      <h3 style="margin-top:0;">Process Letter <span id="la_diaryId" style="color:var(--accent);"></span></h3>
+      <div id="la_summary" style="font-size:13px;color:var(--text-muted);margin-bottom:10px;"></div>
+
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="laAction" value="forward" checked onchange="onLetterActionChange()" style="width:auto;"> Forward to Someone</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="laAction" value="closeResponse" onchange="onLetterActionChange()" style="width:auto;"> Close - Response Letter Issued</label>
+      </div>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="laAction" value="closeFiled" onchange="onLetterActionChange()" style="width:auto;"> Close - File for Information</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="laAction" value="return" onchange="onLetterActionChange()" style="width:auto;"> Return (Objection)</label>
+      </div>
+
+      <div id="la_forwardFields">
+        <div class="field"><label>Forward To</label><select id="la_forwardTo"><option value="">-- select --</option></select></div>
+        <div class="field"><label>Notes (optional)</label><textarea id="la_forwardNotes" rows="5" style="width:100%;min-height:120px;max-width:100%;resize:both;"></textarea></div>
+      </div>
+      <div id="la_closeResponseFields" style="display:none;">
+        <div class="row">
+          <div class="field"><label>Response Letter Ref. No.</label><input type="text" id="la_responseRef"></div>
+          <div class="field"><label>Response Letter Date</label><input type="date" id="la_responseDate"></div>
+        </div>
+        <div class="field"><label>Details / Response</label><textarea id="la_responseDetails" rows="9" style="width:100%;min-height:220px;max-width:100%;resize:both;"></textarea></div>
+        <div class="field"><label>Attach the Response Letter (PDF or JPEG, max 5 MB - optional)</label><input type="file" id="la_responseFile" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>
+      </div>
+      <div id="la_closeFiledFields" style="display:none;">
+        <div class="field"><label>Filing Detail (folder/reference, for the record)</label><textarea id="la_filedDetails" rows="4" style="width:100%;min-height:100px;max-width:100%;resize:both;"></textarea></div>
+      </div>
+      <div id="la_returnFields" style="display:none;">
+        <div class="field"><label>Objection / Reason for Return</label><textarea id="la_returnObjection" rows="9" style="width:100%;min-height:220px;max-width:100%;resize:both;"></textarea></div>
+        <div class="row">
+          <div class="field"><label>Return Diary No.</label><input type="text" id="la_returnRefNo"></div>
+          <div class="field"><label>Return Date</label><input type="date" id="la_returnDate"></div>
+          <div class="field"><label>Receiver's Name</label><input type="text" id="la_returnReceiver"></div>
+        </div>
+        <div class="field"><label>Attach the Objection Letter (PDF or JPEG, max 5 MB - optional)</label><input type="file" id="la_returnFile" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="submitLetterAction()">Submit</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('letterActionModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= RETURN A LETTER / A BILL STILL AT DIARY STAGE 0 (before any Bill ID "E...") ================= -->
+  <div id="billReturnModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:105; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:820px; width:100%; margin:0; max-height:92vh; overflow-y:auto;">
+      <h3 style="margin-top:0;">Return <span id="br_diaryId" style="color:var(--accent);"></span></h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">You keep a view-only record. The Diary Clerk/Admin will re-assign it.</p>
+      <div class="field"><label>Objection / Reason for Return</label><textarea id="br_objection" rows="9" style="width:100%;min-height:220px;max-width:100%;resize:both;"></textarea></div>
+      <div class="row">
+        <div class="field"><label>Return Diary No.</label><input type="text" id="br_refNo"></div>
+        <div class="field"><label>Return Date</label><input type="date" id="br_date"></div>
+        <div class="field"><label>Receiver's Name</label><input type="text" id="br_receiver"></div>
+      </div>
+      <div class="field"><label>Attach the Objection Letter (PDF or JPEG, max 5 MB - optional)</label><input type="file" id="br_file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="submitBillReturn()">Submit</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('billReturnModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>

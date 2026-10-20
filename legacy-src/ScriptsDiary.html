@@ -1,0 +1,1993 @@
+<script>
+/* =================================================================
+   SCRIPTSDIARY - Stage 0 Diary, Diary Report, Confirmation,
+   Reconciliation (loaded after Scripts.html; shares its functions).
+   The last sections deliberately re-define a few functions from Scripts.html -
+   the later definition wins.
+   ================================================================= */
+
+let CURRENT_DIARY_ID = null;
+
+/* ---------- Bulk bill covering several Diary numbers ---------- */
+let BULK_DIARY_CANDIDATES = [];
+const BULK_DIARY_PICKED = new Set();
+async function loadBulkDiaryPicker(){
+  const body = document.getElementById('bulkDiaryPickerBody');
+  if (!body) return;
+  const list = await gs('getUserDiaryQueue', CURRENT_USER.username, {}).catch(() => []);
+  // Only open Bill items still waiting to be entered, assigned to this user.
+  BULK_DIARY_CANDIDATES = (list || []).filter(r => r.itemType === 'Bill' && r.status === 'Pending' && !r.linkedEntryId && !r.isHeld);
+  renderBulkDiaryPicker();
+}
+function renderBulkDiaryPicker(){
+  const body = document.getElementById('bulkDiaryPickerBody');
+  if (!body) return;
+  body.innerHTML = BULK_DIARY_CANDIDATES.map(r => {
+    const locked = (r.diaryId === CURRENT_DIARY_ID);
+    const checked = locked || BULK_DIARY_PICKED.has(r.diaryId);
+    return `<tr><td><input type="checkbox" class="chk-bulkDiary" value="${r.diaryId}" ${checked ? 'checked' : ''} ${locked ? 'disabled' : ''} onchange="toggleBulkDiaryPick('${r.diaryId}', this.checked)"></td>
+      <td>${diaryIdLink(r.diaryId)}</td><td>${diaryTypeLabel(r)}</td><td>${escHtml_(r.senderLabel)}</td>
+      <td>${escHtml_(r.roughDescription)}</td><td class="num">${r.amount != null ? num(r.amount) : ''}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No other pending Diary bills are assigned to you.</td></tr>';
+  updateBulkDiaryTotals();
+}
+function toggleBulkDiaryPick(id, checked){
+  if (checked) BULK_DIARY_PICKED.add(id); else BULK_DIARY_PICKED.delete(id);
+  updateBulkDiaryTotals();
+}
+function selectedBulkDiaryIds(){
+  const ids = [];
+  if (CURRENT_DIARY_ID) ids.push(CURRENT_DIARY_ID);
+  BULK_DIARY_CANDIDATES.forEach(r => { if (BULK_DIARY_PICKED.has(r.diaryId) && ids.indexOf(r.diaryId) === -1) ids.push(r.diaryId); });
+  return ids;
+}
+function updateBulkDiaryTotals(){
+  const el = document.getElementById('bulkDiaryTotals');
+  if (!el) return;
+  const ids = selectedBulkDiaryIds();
+  let diaryTotal = 0, anyAmount = false;
+  ids.forEach(id => { const r = BULK_DIARY_CANDIDATES.find(x => x.diaryId === id); if (r && r.amount != null){ diaryTotal += Number(r.amount); anyAmount = true; } });
+  const bulkTotal = (typeof BULK_LINE_ITEMS !== 'undefined' ? BULK_LINE_ITEMS : []).reduce((s, r) => s + Number(r.amount || 0), 0);
+  let text = '<b>' + ids.length + '</b> Diary number(s) selected' + (anyAmount ? ' - Diary total <b>' + num(diaryTotal) + '</b>' : '') +
+    (bulkTotal ? ' - CSV gross total <b>' + num(bulkTotal) + '</b>' : '') + '.';
+  if (anyAmount && bulkTotal && Math.round(diaryTotal) !== Math.round(bulkTotal)){
+    text += ' <span style="color:var(--amber);">The totals differ - you can still save (warning only).</span>';
+  }
+  el.innerHTML = text;
+}
+
+const DIARY_STAGE_COLORS = { 0:'var(--text-muted)', 1:'#93C5FD', 2:'#FCD34D', 3:'#93C5FD', 4:'#6EE7B7', 5:'var(--danger)', 6:'var(--accent)', 7:'var(--amber)' };
+function diaryStagePill(stage, label){
+  return `<span style="color:${DIARY_STAGE_COLORS[stage]||'inherit'};font-weight:700;">${label}</span>`;
+}
+function diaryIdLink(diaryId){
+  return `<a href="javascript:void(0)" onclick="openDiaryTrail('${diaryId}')" style="color:var(--accent);font-weight:600;text-decoration:underline;">${diaryId}</a>`;
+}
+function daysWaitingCell(days){
+  return `<span style="color:${days>10?'var(--danger)':'inherit'};font-weight:${days>10?'700':'400'};">${days}</span>`;
+}
+
+/* ---------- Safe text for HTML (names with quotes/apostrophes/& must never break a button) ---------- */
+function escHtml_(s){
+  return String(s === null || s === undefined ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// A value safely embedded in onclick="fn(...)": JSON text, then HTML-escaped.
+function attrJson_(v){ return escHtml_(JSON.stringify(v)); }
+
+/* ---------- Shared dropdown loaders ---------- */
+function fillOriginatingOfficeSelect(selectId){
+  gs('getReceivingOffices').then(list=>{
+    const sel = document.getElementById(selectId);
+    sel.innerHTML = '<option value="">-- select --</option>' +
+      list.map(o=>`<option value="${o.OfficeID}">${escHtml_(o.OfficeName)}</option>`).join('') +
+      '<option value="__others__">Others (type name)</option>';
+  }).catch(()=>{});
+}
+function fillOfficeFilterSelect(selectId, placeholder){
+  gs('getReceivingOffices').then(list=>{
+    fillSelect(selectId, list, 'OfficeID', 'OfficeName', placeholder || 'All Offices');
+  }).catch(()=>{});
+}
+function loadDiaryClerkDropdowns(){
+  gs('getDiaryEligibleUsers').then(list=>{
+    fillSelect('dy_assignee', list, 'Username', 'FullName');
+    fillSelect('dy_pendingUser', list, 'Username', 'FullName', '-- All Users --');
+  }).catch(()=>{});
+  fillOriginatingOfficeSelect('dy_originatingOffice');
+  fillOfficeFilterSelect('dy_pendingOffice', 'All Offices');
+  if (document.getElementById('dy_date')) document.getElementById('dy_date').valueAsDate = new Date();
+}
+function loadDiaryUserDropdowns(){
+  fillOfficeFilterSelect('dy_myOffice', 'All Offices');
+}
+
+/* ---------- Log a New Bill or Letter (Diary Clerk) ---------- */
+function onDyItemTypeChange(){
+  const isBill = document.querySelector('input[name="dyItemType"]:checked').value === 'Bill';
+  document.getElementById('dy_billFields').style.display = isBill ? '' : 'none';
+  document.getElementById('dy_letterFields').style.display = isBill ? 'none' : '';
+}
+function diaryTypeLabel(r){ return (r.itemType === 'Bill' && r.billType) ? ('Bill (' + r.billType + ')') : r.itemType; }
+// Reads a chosen PDF/JPEG file as {name, mime, base64}; resolves null when nothing was chosen.
+function readAttachmentInput_(inputId){
+  return new Promise((resolve, reject) => {
+    const el = document.getElementById(inputId);
+    const file = el && el.files && el.files[0];
+    if (!file){ resolve(null); return; }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (['pdf','jpg','jpeg','png'].indexOf(ext) === -1){ reject(new Error('Only PDF or JPEG/JPG (or PNG) files can be attached.')); return; }
+    if (file.size > 5 * 1024 * 1024){ reject(new Error('The file is too large (5 MB maximum).')); return; }
+    const fr = new FileReader();
+    fr.onload = () => { const str = String(fr.result); resolve({ name: file.name, mime: file.type, base64: str.substring(str.indexOf(',') + 1) }); };
+    fr.onerror = () => reject(new Error('Could not read the file.'));
+    fr.readAsDataURL(file);
+  });
+}
+async function openDiaryAttachment(attachmentId, view){
+  let w = null;
+  if (view) w = window.open('', '_blank');   // opened first (inside the click) so the browser does not block it
+  const res = await gs('getDiaryAttachmentData', attachmentId).catch(e => ({ success:false, message: e.message || e }));
+  if (!res || !res.success){ if (w) w.close(); toast((res && res.message) || 'Could not open the file.', 'error'); return; }
+  const bin = atob(res.base64);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const url = URL.createObjectURL(new Blob([arr], { type: res.mime }));
+  if (view && w){ w.location.href = url; }
+  else { const a = document.createElement('a'); a.href = url; a.download = res.name; document.body.appendChild(a); a.click(); a.remove(); }
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+function onDySenderTypeChange(){
+  const type = document.getElementById('dy_senderType').value;
+  document.getElementById('dy_vendorWrap').style.display = (type==='Vendor') ? '' : 'none';
+  document.getElementById('dy_employeeWrap').style.display = (type==='Employee') ? '' : 'none';
+  document.getElementById('dy_nonueWrap').style.display = (type==='NonUEEmployee') ? '' : 'none';
+  document.getElementById('dy_nonueCnicWrap').style.display = (type==='NonUEEmployee') ? '' : 'none';
+  document.getElementById('dy_officeWrap').style.display = (type==='Office') ? '' : 'none';
+}
+function onDyOriginatingOfficeChange(){
+  document.getElementById('dy_originatingOtherWrap').style.display =
+    (document.getElementById('dy_originatingOffice').value === '__others__') ? '' : 'none';
+}
+async function submitDiaryEntry(){
+  const senderType = document.getElementById('dy_senderType').value;
+  const itemType = document.querySelector('input[name="dyItemType"]:checked').value;
+  const billTypeEl = document.querySelector('input[name="dyBillType"]:checked');
+  const data = {
+    itemType: itemType,
+    dateReceived: document.getElementById('dy_date').value,
+    senderReferenceDate: document.getElementById('dy_senderDate').value,
+    senderType: senderType,
+    vendorName: senderType==='NonUEEmployee' ? document.getElementById('dy_nonueName').value.trim() : document.getElementById('dy_vendorName').value.trim(),
+    cnic: document.getElementById('dy_nonueCnic').value.trim(),
+    employeeId: document.getElementById('dy_employeeId').value.trim(),
+    senderOfficeName: document.getElementById('dy_senderOfficeName').value.trim(),
+    senderReferenceNo: document.getElementById('dy_senderRef').value.trim(),
+    originatingOfficeId: document.getElementById('dy_originatingOffice').value,
+    originatingOfficeOther: document.getElementById('dy_originatingOther').value.trim(),
+    roughDescription: document.getElementById('dy_desc').value.trim(),
+    assignedTo: document.getElementById('dy_assignee').value,
+    amount: itemType==='Bill' ? document.getElementById('dy_amount').value : '',
+    billType: (itemType==='Bill' && billTypeEl) ? billTypeEl.value : ''
+  };
+  if (senderType==='Vendor' && !data.vendorName){ toast('Enter the Vendor Name.', 'error'); return; }
+  if (senderType==='Employee' && !data.employeeId){ toast('Enter the Employee ID.', 'error'); return; }
+  if (senderType==='NonUEEmployee' && (!data.vendorName || !data.cnic)){ toast('Enter both the Non-UE Employee Name and CNIC.', 'error'); return; }
+  if (senderType==='Office' && !data.senderOfficeName){ toast('Enter the Sender Office Name.', 'error'); return; }
+  if (!data.dateReceived){ toast('Date Received is required.', 'error'); return; }
+  if (!data.senderReferenceDate){ toast("Sender's Diary / Letter Date is required.", 'error'); return; }
+  if (!data.senderReferenceNo){ toast('Reference / Diary No. of the Sender is required.', 'error'); return; }
+  if (!data.roughDescription){ toast('Description is required.', 'error'); return; }
+  if (itemType==='Bill' && !(Number(data.amount) > 0)){ toast('Enter the Amount of the bill.', 'error'); return; }
+  if (itemType==='Bill' && !data.billType){ toast('Select Single bill or Bulk bill.', 'error'); return; }
+  if (!data.originatingOfficeId){ toast('Select the Originating Office (or Others).', 'error'); return; }
+  if (data.originatingOfficeId==='__others__' && !data.originatingOfficeOther){ toast('Enter the Originating Office name.', 'error'); return; }
+  if (!data.assignedTo){ toast('Assign this item to someone.', 'error'); return; }
+  if (itemType==='Letter'){
+    try { const att = await readAttachmentInput_('dy_file'); if (att) data.attachment = att; }
+    catch(e){ toast(e.message, 'error'); return; }
+  }
+
+  const res = await runAction(document.getElementById('btnLogDiary'), 'Logging...', 'Item logged and assigned.',
+    () => gs('createDiaryEntry', data, CURRENT_USER.username));
+  if (res && res.success){
+    ['dy_vendorName','dy_employeeId','dy_nonueName','dy_nonueCnic','dy_senderDate','dy_senderOfficeName','dy_senderRef','dy_desc','dy_amount','dy_file'].forEach(id=>document.getElementById(id).value='');
+    document.querySelectorAll('input[name="dyBillType"]').forEach(r => r.checked = false);
+    document.getElementById('dy_originatingOffice').value = '';
+    document.getElementById('dy_originatingOther').value = '';
+    document.getElementById('dy_originatingOtherWrap').style.display = 'none';
+    document.getElementById('dy_assignee').value = '';
+    document.getElementById('dy_lastId').innerText = 'Logged as ' + res.diaryId + ' - write this on the physical item.';
+    if (res.attachmentWarning) toast(res.attachmentWarning, 'error');
+    refreshBadges();
+  }
+}
+
+/* ---------- Stage summary boxes ---------- */
+function renderDiaryStageBoxes(containerId, stageCounts){
+  const boxClass = { 0:'bal-spent', 1:'bal-allocated', 2:'bal-allocated', 3:'bal-allocated', 4:'bal-allocated', 5:'bal-spent', 6:'bal-remaining', 7:'bal-spent' };
+  document.getElementById(containerId).innerHTML = stageCounts.map(s =>
+    `<div class="${boxClass[s.stage]}"><span class="label">${s.stage} - ${s.label}</span><span class="val">${s.count}</span></div>`).join('');
+}
+
+/* ---------- Diary Clerk: Pending Diary Items ---------- */
+/* ---- Pending Diary Items: filters, compact table, column picker remembered in this browser ---- */
+const PD_COLUMNS = [
+  ['diaryId','DN / Bill / Letter No.'], ['dateReceived','Date Received'], ['itemType','Type'], ['sender','Sender'], ['employeeId','Employee ID'],
+  ['description','Description'], ['amount','Amount'], ['office','Originating Office'], ['assignedTo','Assigned To'], ['stage','Stage'],
+  ['daysAtStage','Days at Stage'], ['daysWaiting','Days Since Arrival'], ['action','Action']
+];
+const PD_DEFAULT_VISIBLE = ['diaryId','dateReceived','itemType','sender','description','amount','office','assignedTo','stage','daysAtStage','daysWaiting','action'];
+const PD_STORAGE_KEY = 'dy_pending_columns_v1';
+let PD_ROWS = [];
+function pdVisibleColumns_(){
+  try {
+    const saved = JSON.parse(localStorage.getItem(PD_STORAGE_KEY) || 'null');
+    if (Array.isArray(saved) && saved.length) return saved;
+  } catch(e){}
+  return PD_DEFAULT_VISIBLE.slice();
+}
+function pdSaveVisible_(list){ try { localStorage.setItem(PD_STORAGE_KEY, JSON.stringify(list)); } catch(e){} }
+function buildPendingColumnPicker_(){
+  const box = document.getElementById('pd_columns');
+  if (!box) return;
+  const vis = pdVisibleColumns_();
+  box.innerHTML = PD_COLUMNS.map(c => `<label><input type="checkbox" class="pdcol" value="${c[0]}" ${vis.indexOf(c[0]) !== -1 ? 'checked' : ''} onchange="onPendingColumnToggle()"> ${c[1]}</label>`).join('');
+}
+function togglePendingColumnPicker(){
+  const el = document.getElementById('pd_colPicker');
+  if (el.style.display === 'none'){ buildPendingColumnPicker_(); el.style.display = 'block'; } else el.style.display = 'none';
+}
+function onPendingColumnToggle(){
+  const vis = PD_COLUMNS.map(c => c[0]).filter(k => { const el = document.querySelector('.pdcol[value="' + k + '"]'); return el && el.checked; });
+  pdSaveVisible_(vis.length ? vis : PD_DEFAULT_VISIBLE.slice());
+  renderPendingTable();
+}
+function resetPendingColumns(){
+  try { localStorage.removeItem(PD_STORAGE_KEY); } catch(e){}
+  buildPendingColumnPicker_(); renderPendingTable();
+}
+function renderPendingTable(){
+  const vis = pdVisibleColumns_();
+  const cols = PD_COLUMNS.filter(c => vis.indexOf(c[0]) !== -1);
+  document.getElementById('pdHeadRow').innerHTML = cols.map(c => `<th>${c[1]}</th>`).join('');
+  const cell = (r, key) => {
+    switch (key){
+      case 'diaryId': return `<td class="nowrap">${diaryIdLink(r.diaryId)}${r.linkedEntryId ? ' / ' + billIdLink(r.linkedEntryId) : ''}</td>`;
+      case 'dateReceived': return `<td class="nowrap">${fmtDate(r.dateReceived)}</td>`;
+      case 'itemType': return `<td>${diaryTypeLabel(r)}</td>`;
+      case 'sender': return `<td>${escHtml_(r.senderLabel)}</td>`;
+      case 'employeeId': return `<td>${escHtml_(r.employeeId || '')}</td>`;
+      case 'description': return `<td style="min-width:150px;">${escHtml_(r.roughDescription)}</td>`;
+      case 'amount': return `<td class="num">${r.amount != null ? num(r.amount) : ''}</td>`;
+      case 'office': return `<td>${escHtml_(r.originatingOffice || '-')}</td>`;
+      case 'assignedTo': return `<td>${escHtml_(r.assignedTo)}</td>`;
+      case 'stage': return `<td>${diaryStagePill(r.stage, r.stage + ' - ' + escHtml_(r.stageLabel))}${r.isHeld ? ' <span style="color:var(--amber);font-size:10.5px;">(resume from Returned / Sent tabs)</span>' : ''}</td>`;
+      case 'daysAtStage': return `<td class="num">${daysWaitingCell(r.daysAtCurrentStage)}</td>`;
+      case 'daysWaiting': return `<td class="num">${daysWaitingCell(r.daysWaiting)}</td>`;
+      case 'action': return `<td>${(CURRENT_USER.role === 'Admin' && !r.isHeld) ? `<button class="secondary" style="padding:1px 6px;font-size:10.5px;min-height:0;" onclick="adminReassignAnyPrompt('${r.diaryId}')">Admin Reassign</button>` : ''}</td>`;
+    }
+    return '<td></td>';
+  };
+  document.querySelector('#pendingDiaryTable tbody').innerHTML = PD_ROWS.map(r => '<tr>' + cols.map(c => cell(r, c[0])).join('') + '</tr>').join('') || emptyRow(cols.length || 1);
+  const cnt = document.getElementById('pd_count');
+  if (cnt) cnt.textContent = PD_ROWS.length + ' item(s) shown.';
+}
+async function loadPendingDiaryItems(){
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  const filters = {
+    assignedTo: document.getElementById('dy_pendingUser').value,
+    originatingOfficeId: document.getElementById('dy_pendingOffice').value,
+    query: val('dy_pendingQuery'),
+    employeeId: val('dy_pendingEmpId'), description: val('dy_pendingDesc'), amount: val('dy_pendingAmount'),
+    minDaysWaiting: document.getElementById('dy_only10days').checked ? 10 : 0
+  };
+  const tbody = document.querySelector('#pendingDiaryTable tbody');
+  tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>';
+  PD_ROWS = await gs('getPendingDiaryItems', filters, CURRENT_USER.username).catch(e=>{ toast(e.message||e, 'error'); return []; }) || [];
+  renderPendingTable();
+
+  if (filters.assignedTo){
+    document.getElementById('dy_userSummaryBox').style.display = 'block';
+    const summary = await gs('getUserDiaryStageSummary', filters.assignedTo).catch(()=>[]);
+    renderDiaryStageBoxes('dy_stageSummaryBoxes', summary);
+  } else {
+    document.getElementById('dy_userSummaryBox').style.display = 'none';
+  }
+}
+async function downloadDiaryUserSummary(format){
+  const username = document.getElementById('dy_pendingUser').value;
+  if (!username){ toast('Select a user first.', 'error'); return; }
+  const stage = document.getElementById('dy_exportStage').value;
+  const rows = await gs('getUserDiarySummaryForExport', username, stage, CURRENT_USER.username).catch(e=>{ toast(e.message||e, 'error'); return null; });
+  if (!rows) return;
+  if (!rows.length){ toast('Nothing to export for this selection.', 'error'); return; }
+  const cols = [['diaryId','Diary Number'],['itemType','Type'],['dateReceived','Date Received'],['senderLabel','Sender'],
+    ['originatingOffice','Originating Office'],['stageLabel','Stage'],['daysWaiting','Days Waiting']];
+  const fname = 'Diary_Summary_' + username + (stage!=='' ? '_stage'+stage : '');
+  if (format === 'csv'){
+    exportArrayToCSV(rows.map(r=>({...r, dateReceived: fmtDate(r.dateReceived)})), cols, fname + '.csv');
+  } else {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+    doc.setFontSize(13); doc.text('Diary Summary - ' + username, 24, 26);
+    doc.autoTable({
+      head: [cols.map(c=>c[1])], body: rows.map(r => cols.map(c => c[0]==='dateReceived' ? fmtDate(r[c[0]]) : r[c[0]])),
+      startY: 40, styles:{fontSize:8,cellPadding:2}, headStyles:{fillColor:[28,61,90],textColor:255},
+      columnStyles: { 6: { halign:'right' } }, margin:{left:20,right:20}
+    });
+    doc.save(fname + '.pdf');
+  }
+}
+
+/* ---------- Admin: universal reassign of a normal (not held) item ---------- */
+async function adminReassignAnyPrompt(diaryId){
+  const list = await gs('getDiaryEligibleUsers');
+  const names = list.map(u => u.Username + ' (' + u.FullName + ')').join(', ');
+  const newUser = prompt('Reassign ' + diaryId + ' to (type exact username):\n\nAvailable: ' + names);
+  if (!newUser) return;
+  const reason = prompt('Reason (kept on the audit trail):') || '';
+  const res = await runAction(null, 'Reassigning...', 'Reassigned.', () => gs('adminReassignAny', diaryId, newUser.trim(), reason, CURRENT_USER.username));
+  if (res && res.success){ refreshBadges(); if (document.getElementById('dy_pendingUser')) loadPendingDiaryItems(); }
+}
+
+/* ---------- Returned / On Hold + Sent to Other Offices (Diary Clerk / Admin only) ---------- */
+async function loadHeldItems(){
+  if (!document.getElementById('onHoldTable')) return;
+  const res = await gs('getHeldItemsForController', CURRENT_USER.username).catch(e=>{ toast(e.message||e, 'error'); return null; });
+  if (!res) return;
+  const idCell = r => (r.diaryId ? diaryIdLink(r.diaryId) : '') + (r.linkedEntryId ? (r.diaryId ? ' / ' : '') + billIdLink(r.linkedEntryId) : '');
+  const btn = r => `<button class="primary" onclick="openResumeModal('${r.diaryId}','${r.linkedEntryId}')">Re-assign &amp; Resume</button>`;
+  document.querySelector('#onHoldTable tbody').innerHTML = (res.returned||[]).map(r => `<tr>
+    <td>${idCell(r)}</td><td>${diaryTypeLabel(r)}</td><td>${escHtml_(r.stageLabel)}</td><td>${escHtml_(r.reason)}</td><td>${escHtml_(r.heldBy)}</td>
+    <td>${fmtDate(r.heldDate)}</td><td>${escHtml_(r.sender)}${r.description ? ' - ' + escHtml_(r.description) : ''}${r.amount!=null ? ' (' + num(r.amount) + ')' : ''}</td>
+    <td>${btn(r)}</td></tr>`).join('') || emptyRow(8);
+  document.querySelector('#sentOfficeTable tbody').innerHTML = (res.sent||[]).map(r => `<tr>
+    <td>${idCell(r)}</td><td>${diaryTypeLabel(r)}</td><td>${escHtml_(r.sender)}</td><td>${escHtml_(r.officeName)}</td><td>${escHtml_(r.reason)}</td>
+    <td>${escHtml_(r.heldBy)}</td><td>${fmtDate(r.heldDate)}</td><td>${btn(r)}</td></tr>`).join('') || emptyRow(8);
+}
+let RM_DIARY_ID = '', RM_ENTRY_ID = '';
+async function openResumeModal(diaryId, entryId){
+  RM_DIARY_ID = diaryId || ''; RM_ENTRY_ID = entryId || '';
+  document.getElementById('rm_itemId').innerText = diaryId || entryId;
+  document.getElementById('rm_note').value = '';
+  document.getElementById('rm_userWrap').style.display = diaryId ? '' : 'none'; // a bill with no Diary record is simply released
+  const eligible = await gs('getDiaryEligibleUsers');
+  fillSelect('rm_user', eligible, 'Username', 'FullName');
+  document.getElementById('resumeModal').style.display = 'flex';
+}
+async function submitResume(){
+  let res;
+  if (RM_DIARY_ID){
+    const user = document.getElementById('rm_user').value;
+    if (!user){ toast('Select who to assign this to.', 'error'); return; }
+    res = await runAction(null, 'Resuming...', 'Re-assigned and resumed.',
+      () => gs('resumeHeldItem', RM_DIARY_ID, user, document.getElementById('rm_note').value.trim(), CURRENT_USER.username));
+  } else {
+    res = await runAction(null, 'Releasing...', 'Released - resumed at its current stage.',
+      () => gs('releaseBillHold', RM_ENTRY_ID, CURRENT_USER.username));
+  }
+  if (res && res.success){
+    document.getElementById('resumeModal').style.display = 'none';
+    loadHeldItems(); refreshBadges();
+    if (document.getElementById('dy_pendingUser')) loadPendingDiaryItems();
+  }
+}
+
+/* ---------- Return a bill at Processing/Passing stage for correction ---------- */
+let BOR_ENTRY_ID = null;
+function openBillOnHoldReturn(entryId){
+  BOR_ENTRY_ID = entryId;
+  document.getElementById('bor_billId').innerText = entryId;
+  document.getElementById('bor_objection').value = '';
+  document.getElementById('billOnHoldReturnModal').style.display = 'flex';
+}
+async function submitBillOnHoldReturn(){
+  const objection = document.getElementById('bor_objection').value.trim();
+  if (!objection){ toast('Enter the objection/reason.', 'error'); return; }
+  const res = await runAction(null, 'Returning...', 'Returned - the Diary Clerk/Admin will re-assign it.',
+    () => gs('returnBillForCorrection', BOR_ENTRY_ID, objection, '', CURRENT_USER.username));
+  if (res && res.success){
+    document.getElementById('billOnHoldReturnModal').style.display = 'none';
+    loadMyDiaryQueue(); loadMyDiaryStageSummary(); refreshBadges();
+    if (STAGE_TABLE_DATA['processingTable']) loadStageTable('Received','processingTable','proc_fy');
+    if (STAGE_TABLE_DATA['passingTable']) loadStageTable('Processed','passingTable','pass_fy');
+  }
+}
+
+/* ---------- Universal reassign modal (current holder only, before Payment/IBFT) ---------- */
+let RA_ITEM_ID = null;
+async function openReassignModal(itemId, kind){
+  RA_ITEM_ID = itemId;
+  document.getElementById('ra_itemId').innerText = itemId + (kind ? ' (' + kind + ')' : '');
+  document.getElementById('ra_purpose').value = '';
+  document.getElementById('ra_targetOffice').value = '';
+  document.querySelector('input[name="raTargetType"][value="user"]').checked = true;
+  onReassignTargetChange();
+  const eligible = await gs('getDiaryEligibleUsers');
+  fillSelect('ra_targetUser', eligible.filter(u=>u.Username!==CURRENT_USER.username), 'Username', 'FullName');
+  document.getElementById('reassignModal').style.display = 'flex';
+}
+function onReassignTargetChange(){
+  const isOffice = document.querySelector('input[name="raTargetType"]:checked').value === 'office';
+  document.getElementById('ra_userWrap').style.display = isOffice ? 'none' : '';
+  document.getElementById('ra_officeWrap').style.display = isOffice ? '' : 'none';
+  document.getElementById('ra_officeNote').style.display = isOffice ? '' : 'none';
+}
+async function submitReassign(){
+  const isOffice = document.querySelector('input[name="raTargetType"]:checked').value === 'office';
+  const purpose = document.getElementById('ra_purpose').value.trim();
+  if (!purpose){ toast('Enter the purpose/reason.', 'error'); return; }
+  const target = isOffice
+    ? { type:'office', officeName: document.getElementById('ra_targetOffice').value.trim() }
+    : { type:'user', username: document.getElementById('ra_targetUser').value };
+  if (isOffice && !target.officeName){ toast('Enter the office name.', 'error'); return; }
+  if (!isOffice && !target.username){ toast('Select who to reassign to.', 'error'); return; }
+  const res = await runAction(null, 'Reassigning...', isOffice ? 'Sent - the Diary Clerk/Admin will re-assign it when it returns.' : 'Reassigned.',
+    () => gs('reassignItem', RA_ITEM_ID, target, purpose, CURRENT_USER.username));
+  if (res && res.success){
+    document.getElementById('reassignModal').style.display = 'none';
+    loadMyDiaryQueue(); loadMyDiaryStageSummary(); refreshBadges();
+    if (STAGE_TABLE_DATA['processingTable']) loadStageTable('Received','processingTable','proc_fy');
+    if (STAGE_TABLE_DATA['passingTable']) loadStageTable('Processed','passingTable','pass_fy');
+  }
+}
+
+/* ---------- User workspace: My Diary Position + My Diary Queue ---------- */
+async function loadMyDiaryStageSummary(){
+  if (!document.getElementById('dy_myStageBoxes')) return;
+  const summary = await gs('getUserDiaryStageSummary', CURRENT_USER.username).catch(()=>[]);
+  renderDiaryStageBoxes('dy_myStageBoxes', summary);
+}
+async function loadMyDiaryQueue(){
+  const tbody = document.querySelector('#myDiaryQueueTable tbody');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>';
+  const filters = {
+    originatingOfficeId: document.getElementById('dy_myOffice') ? document.getElementById('dy_myOffice').value : '',
+    query: document.getElementById('dy_myQuery') ? document.getElementById('dy_myQuery').value.trim() : ''
+  };
+  const list = await gs('getUserDiaryQueue', CURRENT_USER.username, filters).catch(()=>[]);
+  if (!list.length){ tbody.innerHTML = emptyRow(11); return; }
+  const canEnter = ((ROLE_TABS[CURRENT_USER.role] || []).indexOf('entry') !== -1);
+  tbody.innerHTML = list.map(r => {
+    const billLink = r.linkedEntryId ? billIdLink(r.linkedEntryId) + ' ' : '';
+    let actionBtns = '';
+    if (r.isHeld){
+      // Returned / On Hold / Sent to an office: view-only for the person who returned/sent it.
+      actionBtns = billLink + '<span style="color:var(--amber);font-size:12px;">View only - Diary Clerk/Admin will re-assign</span>';
+    } else if (r.itemType === 'Bill' && r.status === 'Pending' && !r.linkedEntryId){
+      actionBtns = (canEnter ? `<button class="primary" onclick="enterDiaryBill('${r.diaryId}')">Enter This Bill</button> ` : '') + `<button class="secondary" onclick="openBillReturn('${r.diaryId}')">Return</button> <button class="secondary" onclick="openReassignModal('${r.diaryId}','Bill')">Reassign</button>`;
+    } else if (r.itemType === 'Letter' && r.status === 'Pending'){
+      actionBtns = `<button class="primary" onclick="openLetterAction('${r.diaryId}')">Process Letter</button> <button class="secondary" onclick="openReassignModal('${r.diaryId}','Letter')">Reassign</button>`;
+    } else if (r.linkedEntryId && r.stage >= 1 && r.stage <= 2){
+      actionBtns = billLink + `<button class="secondary" onclick="openBillOnHoldReturn('${r.linkedEntryId}')">Return</button> <button class="secondary" onclick="openReassignModal('${r.linkedEntryId}','Bill')">Reassign</button>`;
+    } else if (r.linkedEntryId){
+      actionBtns = billLink; // Payment/IBFT onward - no reassign
+    }
+    return `<tr><td>${diaryIdLink(r.diaryId)}</td><td>${diaryTypeLabel(r)}</td><td>${fmtDate(r.dateReceived)}</td>
+      <td>${daysWaitingCell(r.daysAtCurrentStage)}</td><td>${daysWaitingCell(r.daysWaiting)}</td><td>${escHtml_(r.senderLabel)}</td>
+      <td>${escHtml_(r.roughDescription)}</td><td>${r.amount!=null ? num(r.amount) : ''}</td>
+      <td>${escHtml_(r.originatingOffice||'-')}</td><td>${diaryStagePill(r.stage, escHtml_(r.stageLabel))}</td><td>${actionBtns}</td></tr>`;
+  }).join('');
+}
+
+/* ---------- Enter a Diary bill into New Entry ---------- */
+async function enterDiaryBill(diaryId){
+  const d = await gs('getDiaryById', diaryId);
+  if (!d){ toast('Could not load this diary item.', 'error'); return; }
+  CURRENT_DIARY_ID = diaryId;
+  document.querySelector('.tab-btn[data-tab="entry"]').click();
+
+  if (d.SenderType === 'Employee'){
+    document.querySelector('input[name="payeeType"][value="Employee"]').checked = true;
+    onPayeeTypeChange();
+    document.getElementById('e_employeeid').value = d.EmployeeID || '';
+    onEmployeeIdInput();
+  } else {
+    document.querySelector('input[name="payeeType"][value="Vendor"]').checked = true;
+    onPayeeTypeChange();
+    document.getElementById('e_vendor').value = d.SenderType === 'Office' ? (d.SenderOfficeName||'') : (d.VendorName||'');
+  }
+  document.getElementById('e_billdesc').value = d.RoughDescription || '';
+  if (d.BillType){
+    const mode = d.BillType === 'Bulk' ? 'bulk' : 'single';
+    document.querySelector('input[name="entryMode"][value="' + mode + '"]').checked = true;
+    onEntryModeChange();
+    if (mode === 'single' && d.Amount){ document.getElementById('e_amount').value = d.Amount; onAmountInput(); }
+    if (mode === 'bulk') document.getElementById('bulk_billdesc').value = (d.RoughDescription || '').slice(0, 40);
+  }
+
+  const banner = document.getElementById('dy_activeBanner');
+  if (banner){ banner.style.display = 'block'; banner.innerText = 'Entering ' + diaryId + ' - logged ' + fmtDate(d.DateReceived) + ' by ' + d.LoggedBy + '. Diary says: ' + (d.BillType || 'type not stated') + (d.Amount ? ', amount ' + num(d.Amount) : '') + '. Sender/description are pre-filled and can be changed.'; }
+  if (document.getElementById('e_diaryBypass')){ document.getElementById('e_diaryBypass').checked = false; onDiaryBypassChange(); }
+  toast('Pre-filled from ' + diaryId + ' - review and complete the rest of the form, then Save.', 'success');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function onDiaryBypassChange(){
+  const checked = document.getElementById('e_diaryBypass').checked;
+  document.getElementById('e_diaryBypassReasonWrap').style.display = checked ? '' : 'none';
+  if (checked){
+    CURRENT_DIARY_ID = null;
+    const banner = document.getElementById('dy_activeBanner');
+    if (banner) banner.style.display = 'none';
+  }
+}
+
+/* ---------- Return a Bill still at Diary stage 0 (before any Bill ID "E...") ---------- */
+let BR_DIARY_ID = null;
+function openBillReturn(diaryId){
+  BR_DIARY_ID = diaryId;
+  document.getElementById('br_diaryId').innerText = diaryId;
+  ['br_objection','br_refNo','br_receiver','br_file'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('br_date').valueAsDate = new Date();
+  document.getElementById('billReturnModal').style.display = 'flex';
+}
+async function submitBillReturn(){
+  const objection = document.getElementById('br_objection').value.trim();
+  const refNo = document.getElementById('br_refNo').value.trim();
+  const date = document.getElementById('br_date').value;
+  const receiver = document.getElementById('br_receiver').value.trim();
+  if (!objection){ toast('Enter the objection/reason.', 'error'); return; }
+  if (!receiver){ toast("Enter the receiver's name.", 'error'); return; }
+  let attachment = null;
+  try { attachment = await readAttachmentInput_('br_file'); } catch(e){ toast(e.message, 'error'); return; }
+  const res = await runAction(null, 'Returning...', 'Returned - the Diary Clerk/Admin will re-assign it.',
+    () => gs('returnItem', BR_DIARY_ID, objection, refNo, date, receiver, attachment, CURRENT_USER.username));
+  if (res && res.success){
+    if (res.attachmentWarning) toast(res.attachmentWarning, 'error');
+    document.getElementById('billReturnModal').style.display='none'; loadMyDiaryQueue(); loadMyDiaryStageSummary(); refreshBadges();
+  }
+}
+
+/* ---------- Letter processing modal ---------- */
+let LA_DIARY_ID = null;
+async function openLetterAction(diaryId){
+  LA_DIARY_ID = diaryId;
+  const d = await gs('getDiaryById', diaryId);
+  if (!d){ toast('Could not load this letter.', 'error'); return; }
+  document.getElementById('la_diaryId').innerText = diaryId;
+  document.getElementById('la_summary').innerText = (d.RoughDescription||'(no description)') + ' - from ' +
+    (d.SenderType==='Employee' ? ('Employee '+d.EmployeeID) : (d.SenderType==='Office' ? d.SenderOfficeName : d.VendorName)) +
+    ', received ' + fmtDate(d.DateReceived) + '.';
+  const eligible = await gs('getDiaryEligibleUsers');
+  fillSelect('la_forwardTo', eligible.filter(u=>u.Username!==CURRENT_USER.username), 'Username', 'FullName');
+  document.querySelector('input[name="laAction"][value="forward"]').checked = true;
+  onLetterActionChange();
+  ['la_forwardNotes','la_responseRef','la_responseDetails','la_filedDetails','la_returnObjection','la_returnRefNo','la_returnReceiver','la_responseFile','la_returnFile']
+    .forEach(id=>document.getElementById(id).value='');
+  document.getElementById('la_responseDate').valueAsDate = new Date();
+  document.getElementById('la_returnDate').valueAsDate = new Date();
+  document.getElementById('letterActionModal').style.display = 'flex';
+}
+function onLetterActionChange(){
+  const action = document.querySelector('input[name="laAction"]:checked').value;
+  document.getElementById('la_forwardFields').style.display = (action==='forward') ? '' : 'none';
+  document.getElementById('la_closeResponseFields').style.display = (action==='closeResponse') ? '' : 'none';
+  document.getElementById('la_closeFiledFields').style.display = (action==='closeFiled') ? '' : 'none';
+  document.getElementById('la_returnFields').style.display = (action==='return') ? '' : 'none';
+}
+async function submitLetterAction(){
+  const action = document.querySelector('input[name="laAction"]:checked').value;
+  let res;
+  if (action === 'forward'){
+    const to = document.getElementById('la_forwardTo').value;
+    if (!to){ toast('Select who to forward to.', 'error'); return; }
+    res = await runAction(null, 'Forwarding...', 'Forwarded.',
+      () => gs('forwardLetter', LA_DIARY_ID, to, document.getElementById('la_forwardNotes').value.trim(), CURRENT_USER.username));
+  } else if (action === 'closeResponse'){
+    let attachment = null;
+    try { attachment = await readAttachmentInput_('la_responseFile'); } catch(e){ toast(e.message, 'error'); return; }
+    res = await runAction(null, 'Closing...', 'Closed with response.',
+      () => gs('closeLetterWithResponse', LA_DIARY_ID, document.getElementById('la_responseRef').value.trim(),
+        document.getElementById('la_responseDate').value, document.getElementById('la_responseDetails').value.trim(), attachment, CURRENT_USER.username));
+  } else if (action === 'closeFiled'){
+    res = await runAction(null, 'Filing...', 'Filed for information.',
+      () => gs('closeLetterFiled', LA_DIARY_ID, document.getElementById('la_filedDetails').value.trim(), CURRENT_USER.username));
+  } else {
+    const objection = document.getElementById('la_returnObjection').value.trim();
+    const receiver = document.getElementById('la_returnReceiver').value.trim();
+    if (!objection){ toast('Enter the objection/reason.', 'error'); return; }
+    if (!receiver){ toast("Enter the receiver's name.", 'error'); return; }
+    let attachment = null;
+    try { attachment = await readAttachmentInput_('la_returnFile'); } catch(e){ toast(e.message, 'error'); return; }
+    res = await runAction(null, 'Returning...', 'Returned - the Diary Clerk/Admin will re-assign it.',
+      () => gs('returnItem', LA_DIARY_ID, objection, document.getElementById('la_returnRefNo').value.trim(),
+        document.getElementById('la_returnDate').value, receiver, attachment, CURRENT_USER.username));
+  }
+  if (res && res.success){
+    if (res.attachmentWarning) toast(res.attachmentWarning, 'error');
+    document.getElementById('letterActionModal').style.display='none'; loadMyDiaryQueue(); loadMyDiaryStageSummary(); refreshBadges();
+  }
+}
+
+/* ---------- DN Trail popup ---------- */
+function movementActionLabel_(a){
+  return { Assigned:'Assigned', Forwarded:'Forwarded', ClosedResponse:'Closed - Response Issued', ClosedFiled:'Closed - Filed',
+    Returned:'Returned', Reassigned:'Reassigned', AdminReassigned:'Reassigned (Admin)', SentToOffice:'Sent to Another Office',
+    ResumedByController:'Re-assigned & Resumed (Diary Clerk/Admin)', ReturnedForCorrection:'Returned for Correction',
+    BillDeleted:'Bill Deleted - Back to Diary Pending', CombinedIntoBulkBill:'Combined into a Bulk Bill',
+    OfficeConfirmedArrival:'Office Confirmed Arrival', Released:'Released - Resumed',
+    AdminEdited:'Diary Details Edited (Admin)', AdminCancelled:'Diary Cancelled (Admin)', AdminRestored:'Diary Restored (Admin)',
+    AdminDelinked:'De-linked from Bill (Admin)', AdminLinked:'Linked to Bill (Admin)' }[a] || a;
+}
+function attachmentKindLabel_(k){ return { Original:'Original letter', Response:'Response letter', Objection:'Objection letter' }[k] || k; }
+function attachmentLinksHtml_(a){
+  const link = 'color:var(--accent);text-decoration:underline;';
+  return `<div style="margin:2px 0;"><b>${attachmentKindLabel_(a.kind)}:</b> ${escHtml_(a.fileName)} ` +
+    `<a href="javascript:void(0)" onclick="openDiaryAttachment('${a.attachmentId}', true)" style="${link}">View</a> | ` +
+    `<a href="javascript:void(0)" onclick="openDiaryAttachment('${a.attachmentId}', false)" style="${link}">Download</a></div>`;
+}
+async function openDiaryTrail(diaryId){
+  document.getElementById('diaryTrailModal').style.display = 'flex';
+  document.getElementById('diaryTrailContent').innerHTML = 'Loading...';
+  const res = await gs('getDiaryTrail', diaryId).catch(e=>({success:false,message:e.message||e}));
+  if (!res || !res.success){ document.getElementById('diaryTrailContent').innerHTML = '<p class="error">'+(res&&res.message||'Could not load.')+'</p>'; return; }
+  const d = res.diary;
+  const senderLabel = d.SenderType==='Employee' ? ('Employee '+d.EmployeeID) : (d.SenderType==='Office' ? d.SenderOfficeName : d.VendorName);
+  const attByMove = {};
+  (res.attachments || []).forEach(a => { (attByMove[a.movementId] || (attByMove[a.movementId] = [])).push(a); });
+  const typeText = d.ItemType + (d.ItemType === 'Bill' && d.BillType ? ' (' + d.BillType + ')' : '');
+  let html = `<div style="font-size:13px;color:var(--text-muted);margin-bottom:4px;">${typeText} &middot; Logged ${fmtDate(d.DateReceived)} by ${escHtml_(d.LoggedBy)}</div>
+    <div style="font-weight:700;font-size:16px;margin-bottom:10px;">${diaryStagePill(res.currentStage, res.currentStage+' - '+escHtml_(res.currentStageLabel))} &middot; ${res.daysWaiting} day(s)</div>
+    <div class="bav-grid" style="margin-bottom:14px;">
+      <div class="bav-item"><div class="bav-label">Sender</div><div class="bav-value">${escHtml_(senderLabel)||'-'}</div></div>
+      <div class="bav-item"><div class="bav-label">Sender's Reference No.</div><div class="bav-value">${escHtml_(d.SenderReferenceNo)||'-'}</div></div>
+      <div class="bav-item"><div class="bav-label">Originating Office</div><div class="bav-value">${escHtml_(d.OriginatingOfficeName||d.OriginatingOfficeOther)||'-'}</div></div>
+      <div class="bav-item"><div class="bav-label">Description</div><div class="bav-value">${escHtml_(d.RoughDescription)||'-'}</div></div>
+      ${d.Amount !== '' && d.Amount !== undefined ? `<div class="bav-item"><div class="bav-label">Amount (per Diary)</div><div class="bav-value">${num(d.Amount)}</div></div>` : ''}
+    </div>
+    <h4 style="margin:10px 0 6px;">Movement / Disposal Trail</h4>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Action</th><th>From</th><th>To</th><th>Detail</th><th>Files</th></tr></thead><tbody>`;
+  const wrapCell = 'white-space:normal;min-width:260px;max-width:420px;word-break:break-word;';
+  res.movements.forEach(m => {
+    let detail = m.Details || '';
+    if (m.ActionType === 'ClosedResponse') detail = 'Ref: ' + (m.ResponseRefNo||'-') + ', Dated: ' + fmtDate(m.ResponseDate) + (m.Details?(' - '+m.Details):'');
+    if (m.ActionType === 'Returned') detail = 'Objection: ' + m.ReturnObjection + ' | Return Ref: ' + (m.ReturnRefNo||'-') + ' | Return Date: ' + fmtDate(m.ReturnDate) + ' | Receiver: ' + m.ReturnReceiverName;
+    if (m.ActionType === 'ReturnedForCorrection') detail = 'Objection: ' + (m.ReturnObjection||'') + (m.Details ? ' - ' + m.Details : '');
+    const files = (attByMove[m.MovementID] || []).map(attachmentLinksHtml_).join('');
+    html += `<tr><td>${fmtDate(m.ActionDate)}</td><td>${movementActionLabel_(m.ActionType)}</td><td>${escHtml_(m.FromUser)}</td><td>${escHtml_(m.ToUser)}</td><td style="${wrapCell}">${escHtml_(detail)}</td><td style="white-space:normal;">${files}</td></tr>`;
+  });
+  if (res.billTrail && res.billTrail.length){
+    html += `<tr><td colspan="6" style="background:#0B1220;font-weight:700;">Bill Pipeline (Bill ${d.LinkedEntryID})</td></tr>`;
+    res.billTrail.forEach(b => {
+      html += `<tr><td>${fmtDate(b.date)}</td><td>${escHtml_(b.event)}</td><td>${escHtml_(b.by)}</td><td></td><td style="${wrapCell}">${escHtml_(b.note)}</td><td></td></tr>`;
+    });
+  }
+  html += '</tbody></table></div>';
+  document.getElementById('diaryTrailContent').innerHTML = html;
+}
+
+/* ---------- Diary Report ---------- */
+// The first bar is "0-1" (so items received today are counted), then 2..6, then 7+.
+function buildDiaryChartData_(rows){
+  const days = (rows||[]).map(r => Number(r.daysInQueue)||0);
+  const data = [{ day:'0-1', count: days.filter(d => d <= 1).length }];
+  for (let d = 2; d <= 6; d++) data.push({ day: String(d), count: days.filter(x => x === d).length });
+  data.push({ day:'7+', count: days.filter(d => d >= 7).length });
+  return data;
+}
+function renderDiaryBarChart(containerId, chartData){
+  const max = Math.max(1, ...chartData.map(d=>d.count));
+  const bars = chartData.map(d => {
+    const h = Math.round((d.count / max) * 140);
+    return `<div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;flex:1;min-width:36px;height:170px;">
+      <div style="font-size:12px;font-weight:700;margin-bottom:4px;">${d.count}</div>
+      <div style="width:60%;background:var(--accent);border-radius:4px 4px 0 0;height:${h}px;min-height:2px;"></div>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">${d.day}</div>
+    </div>`;
+  }).join('');
+  document.getElementById(containerId).innerHTML = `<div style="display:flex;align-items:flex-end;gap:8px;padding:10px 4px;border-bottom:1px solid var(--border);">${bars}</div>
+    <div style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:4px;">Days in Queue / to Complete &rarr;</div>`;
+}
+async function loadDiaryReport(){
+  const filters = {
+    assignedTo: document.getElementById('dr_user').value,
+    originatingOfficeId: document.getElementById('dr_office').value,
+    query: document.getElementById('dr_query').value.trim(),
+    includeCompleted: document.getElementById('dr_includeCompleted').checked
+  };
+  const res = await runAction(document.getElementById('btnDiaryReport'), 'Building report...', 'Report loaded.',
+    () => gs('getDiaryReport', filters));
+  if (!res) return;
+  document.querySelector('#diaryReportTable tbody').innerHTML = res.rows.map(r => `<tr>
+    <td>${diaryIdLink(r.diaryId)}</td><td>${fmtDate(r.date)}</td><td>${diaryTypeLabel(r)}</td><td>${escHtml_(r.campus)}</td>
+    <td>${escHtml_(r.assignedTo)}</td><td>${escHtml_(r.currentStatus)}</td><td>${r.daysInQueue}${r.isComplete?' (total)':''}</td></tr>`).join('') || emptyRow(7);
+  renderDiaryBarChart('diaryReportChart', buildDiaryChartData_(res.rows));
+  const officeLabel = document.getElementById('dr_office').selectedOptions[0]?.text || 'All Offices';
+  const bits = [`User: ${filters.assignedTo || 'All Users'}`, `Originating Office: ${officeLabel}`];
+  if (filters.query) bits.push('Search "' + filters.query + '"');
+  setReportCaption('dr_caption', 'dr', bits.join('  |  '));
+}
+
+/* ---------- Confirmation ----------
+   Does NOT auto-load - click Load, then Bill ID/Batch/Beneficiary filter the loaded list live.
+   Each row's ID is EITHER a plain Bill ID OR a "ParentID-LineNo" bulk beneficiary line (e.g. E123-4).
+   Marking a bulk line Failed isolates it into its own new bill (E123-A ...), which moves to
+   Reconciliation; the rest of the bulk bill is untouched. An isolated bill ID like E123-A ends with
+   a letter, so it is never mistaken for a bulk line. */
+let PC_QUEUE_ALL = [];
+const PC_SELECTED = new Set();
+function isBulkLineId_(id){ return /-\d+$/.test(String(id)); }
+async function loadPaymentConfirmQueue(){
+  const fy = document.getElementById('pc_fy').value;
+  const tbody = document.querySelector('#pcQueueTable tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>';
+  PC_QUEUE_ALL = await gs('getPaymentsNeedingConfirmation', fy).catch(()=>[]);
+  PC_SELECTED.clear();
+  document.getElementById('pc_filterRow').style.display = PC_QUEUE_ALL.length ? '' : 'none';
+  document.getElementById('pc_actionRow').style.display = PC_QUEUE_ALL.length ? '' : 'none';
+  ['pc_fBillId','pc_fBatch','pc_fBeneficiary'].forEach(id => document.getElementById(id).value = '');
+  renderPaymentConfirmQueue(PC_QUEUE_ALL);
+  refreshBadges();
+}
+function filterPaymentConfirmQueue(){
+  const fBillId = document.getElementById('pc_fBillId').value.trim().toLowerCase();
+  const fBatch = document.getElementById('pc_fBatch').value.trim().toLowerCase();
+  const fBen = document.getElementById('pc_fBeneficiary').value.trim().toLowerCase();
+  const filtered = PC_QUEUE_ALL.filter(e =>
+    (!fBillId || String(e.EntryID||'').toLowerCase().includes(fBillId)) &&
+    (!fBatch || String(e.BatchID||'').toLowerCase().includes(fBatch)) &&
+    (!fBen || String(e.VendorName||'').toLowerCase().includes(fBen)));
+  renderPaymentConfirmQueue(filtered);
+}
+function renderPaymentConfirmQueue(list){
+  document.querySelector('#pcQueueTable tbody').innerHTML = (list||[]).map(e => `<tr>
+    <td><input type="checkbox" class="chk-pcQueue" value="${e.EntryID}" ${PC_SELECTED.has(e.EntryID)?'checked':''} onchange="togglePcSelection('${e.EntryID}', this.checked)"></td>
+    <td>${billIdLink(e.EntryID)}</td><td>${fmtDate(e.PaidDate)}</td><td>${escHtml_(e.BatchID)}</td>
+    <td>${escHtml_(e.VendorName)}</td><td>${escHtml_(e.IncomeTaxSection||'-')}</td><td>${escHtml_(e.IBAN)}</td><td class="num">${num(netOf_(e))}</td>
+  </tr>`).join('') || emptyRow(8);
+  document.getElementById('pc_countLabel').innerText = list.length + ' item(s) shown, ' + PC_SELECTED.size + ' selected.';
+}
+function togglePcSelection(entryId, checked){
+  if (checked) PC_SELECTED.add(entryId); else PC_SELECTED.delete(entryId);
+  document.getElementById('pc_countLabel').innerText =
+    document.querySelectorAll('#pcQueueTable tbody tr').length + ' item(s) shown, ' + PC_SELECTED.size + ' selected.';
+}
+async function markSelectedPaymentsFailed(){
+  if (!PC_SELECTED.size){ toast('Tick at least one item first.', 'error'); return; }
+  const reason = prompt('Reason for the ' + PC_SELECTED.size + ' selected item(s) failing (e.g. wrong IBAN, closed account, title mismatch).\n\nA failed bulk beneficiary is separated into its own new bill (E...-A) and moved to Reconciliation; the rest of the bulk bill is not affected.');
+  if (reason === null) return;
+  if (!reason.trim()){ toast('A reason is required.', 'error'); return; }
+  const ids = Array.from(PC_SELECTED);
+  const singleIds = ids.filter(id => !isBulkLineId_(id));
+  const lineIds = ids.filter(isBulkLineId_);
+  const res = await runAction(null, 'Marking as failed...', null, async () => {
+    let count = 0, created = [], messages = [];
+    if (singleIds.length){
+      const r = await gs('markPaymentsFailed', singleIds, reason.trim(), CURRENT_USER.username);
+      if (r.success) count += r.count; else messages.push(r.message);
+    }
+    if (lineIds.length){
+      const r = await gs('markBulkLinesFailed', lineIds, reason.trim(), CURRENT_USER.username);
+      if (r.success){ count += r.count; created = created.concat(r.created || []); }
+      if (r.message) messages.push(r.message);
+    }
+    if (!count) return { success:false, message: messages.join(' | ') || 'Nothing was marked failed.' };
+    return { success:true, count, created, messages };
+  });
+  if (res && res.success){
+    toast(res.count + ' item(s) marked Failed - moved to Reconciliation.' +
+      (res.created.length ? ' New Bill ID(s): ' + res.created.map(c => c.newEntryId).join(', ') + '.' : ''), 'success');
+    if (res.messages.length) toast(res.messages.join(' | '), 'error');
+    loadPaymentConfirmQueue();
+  }
+}
+async function confirmAllRemainingPayments(){
+  const rows = Array.from(document.querySelectorAll('#pcQueueTable tbody tr'));
+  if (!rows.length){ toast('Nothing currently shown to confirm.', 'error'); return; }
+  const visibleIds = Array.from(document.querySelectorAll('.chk-pcQueue')).map(c => c.value);
+  if (!visibleIds.length){ toast('Nothing currently shown to confirm.', 'error'); return; }
+  if (!confirm('Confirm payment for all ' + visibleIds.length + ' item(s) currently shown? Anything you meant to mark Failed should be ticked and handled first.')) return;
+  const singleIds = visibleIds.filter(id => !isBulkLineId_(id));
+  const lineIds = visibleIds.filter(isBulkLineId_);
+  const res = await runAction(null, 'Confirming...', null, async () => {
+    let count = 0;
+    if (singleIds.length){ const r = await gs('confirmPayments', singleIds, CURRENT_USER.username); if (r.success) count += r.count; }
+    if (lineIds.length){ const r = await gs('confirmBulkLines', lineIds, CURRENT_USER.username); if (r.success) count += r.count; }
+    return { success:true, count };
+  });
+  if (res && res.success){ toast(res.count + ' item(s) confirmed.', 'success'); loadPaymentConfirmQueue(); }
+}
+
+/* ---------- Reconciliation: failed bills (including isolated beneficiary bills E123-A ...) ---------- */
+async function loadNeedsCorrectionQueue(){
+  const tbody = document.querySelector('#needsCorrectionTable tbody');
+  if (!tbody) return;
+  const list = await gs('getNeedsCorrectionBills', '').catch(()=>[]);
+  tbody.innerHTML = (list||[]).map(e => `<tr>
+    <td>${billIdLink(e.EntryID)}</td>
+    <td>${e.SplitFromEntryID ? billIdLink(e.SplitFromEntryID) + ' (line ' + e.SplitFromLineNo + ')' : '-'}</td>
+    <td>${fmtDate(e.PaymentFailureDate)}</td><td>${escHtml_(e.PaymentFailureReason)}</td>
+    <td>${escHtml_(e.VendorName)}</td><td>${escHtml_(e.IncomeTaxSection||'-')}</td><td>${escHtml_(e.IBAN)}</td><td class="num">${num(netOf_(e))}</td>
+    <td><button class="secondary" onclick="openEditBeneficiary(${attrJson_(e.EntryID)},${attrJson_(e.VendorName||'')},${attrJson_(e.IBAN||'')},${attrJson_(e.CNIC_NTN||'')},false)">Edit</button>
+    <button class="primary" onclick="resubmitFailedPaymentAction('${e.EntryID}')">Resubmit</button></td>
+  </tr>`).join('') || emptyRow(9);
+}
+async function resubmitFailedPaymentAction(entryId){
+  if(!confirm('Send Bill ' + entryId + ' back to the Passed queue for a fresh IBFT attempt? Make sure the beneficiary\'s bank details have already been corrected.')) return;
+  const res = await runAction(null, 'Resubmitting...', 'Sent back to Passed - it will appear in a new IBFT batch, with a retry marker on its Bill ID.',
+    () => gs('resubmitFailedPayment', entryId, CURRENT_USER.username));
+  if (res && res.success){ loadNeedsCorrectionQueue(); refreshBadges(); }
+}
+
+/* ---------- Reconciliation: older failed bulk lines (failed before isolation existed) ---------- */
+async function loadFailedBulkLines(){
+  const tbody = document.querySelector('#failedBulkLinesTable tbody');
+  if (!tbody) return;
+  const list = await gs('getLineLevelConfirmationQueue', '', true).catch(()=>[]);
+  tbody.innerHTML = (list||[]).map(li => `<tr>
+    <td>${billIdLink(li.EntryID)}</td><td>${billIdLink(li.ParentBillID)}</td><td>${fmtDate(li.LinePaymentFailureDate)}</td><td>${escHtml_(li.LinePaymentFailureReason)}</td>
+    <td>${escHtml_(li.VendorName)}</td><td>${escHtml_(li.IncomeTaxSection||'-')}</td><td>${escHtml_(li.IBAN)}</td><td class="num">${num(netOf_(li))}</td>
+    <td><button class="secondary" onclick="openEditBeneficiary(${attrJson_(li.EntryID)},${attrJson_(li.VendorName||'')},${attrJson_(li.IBAN||'')},${attrJson_(li.CNIC_NTN||'')},true)">Edit</button>
+    <button class="primary" onclick="resubmitFailedBulkLineAction('${li.EntryID}')">Resubmit</button></td>
+  </tr>`).join('') || emptyRow(9);
+}
+async function resubmitFailedBulkLineAction(lineId){
+  if(!confirm('Resubmit beneficiary ' + lineId + ' for a fresh IBFT attempt? Make sure their bank details have already been corrected. Every other beneficiary in the same bulk bill is untouched.')) return;
+  const res = await runAction(null, 'Resubmitting...', 'Resubmitted - will appear in a new IBFT batch for just this beneficiary.',
+    () => gs('resubmitFailedBulkLine', lineId, CURRENT_USER.username));
+  if (res && res.success){ loadFailedBulkLines(); refreshBadges(); }
+}
+
+/* ---------- Edit beneficiary detail before resubmitting (single/isolated bill, or older bulk line) ---------- */
+let EB_ENTRY_ID = null;
+let EB_IS_LINE = false;
+function openEditBeneficiary(entryId, name, iban, cnic, isLine){
+  EB_ENTRY_ID = entryId;
+  EB_IS_LINE = !!isLine;
+  document.getElementById('eb_billId').innerText = entryId;
+  document.getElementById('eb_name').value = name || '';
+  document.getElementById('eb_iban').value = iban || '';
+  document.getElementById('eb_cnic').value = cnic || '';
+  document.getElementById('editBeneficiaryModal').style.display = 'flex';
+}
+function collectBeneficiaryEdits(){
+  return { name: document.getElementById('eb_name').value.trim(), iban: document.getElementById('eb_iban').value.trim(), cnic: document.getElementById('eb_cnic').value.trim() };
+}
+async function saveBeneficiaryOnly(){
+  const fn = EB_IS_LINE ? 'updateFailedBulkLineBeneficiary' : 'updateFailedPaymentBeneficiary';
+  const res = await runAction(null, 'Saving...', 'Beneficiary detail updated.',
+    () => gs(fn, EB_ENTRY_ID, collectBeneficiaryEdits(), CURRENT_USER.username));
+  if (res && res.success){ document.getElementById('editBeneficiaryModal').style.display='none'; EB_IS_LINE ? loadFailedBulkLines() : loadNeedsCorrectionQueue(); }
+}
+async function saveAndResubmit(){
+  const editFn = EB_IS_LINE ? 'updateFailedBulkLineBeneficiary' : 'updateFailedPaymentBeneficiary';
+  const resubmitFn = EB_IS_LINE ? 'resubmitFailedBulkLine' : 'resubmitFailedPayment';
+  const saveRes = await runAction(null, 'Saving...', null,
+    () => gs(editFn, EB_ENTRY_ID, collectBeneficiaryEdits(), CURRENT_USER.username));
+  if (!saveRes || !saveRes.success) return;
+  const res = await runAction(null, 'Resubmitting...', 'Updated and sent back for a fresh IBFT attempt.',
+    () => gs(resubmitFn, EB_ENTRY_ID, CURRENT_USER.username));
+  if (res && res.success){
+    document.getElementById('editBeneficiaryModal').style.display='none';
+    EB_IS_LINE ? loadFailedBulkLines() : loadNeedsCorrectionQueue();
+    refreshBadges();
+  }
+}
+
+/* ---------- FBR Tax Adjustments (from Redirect a Paid Bill) ---------- */
+async function loadFBRTaxAdjustments(){
+  const tbody = document.querySelector('#fbrAdjustTable tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>';
+  const list = await gs('getFBRTaxAdjustments', {}, CURRENT_USER.username).catch(e=>{ toast(e.message||e, 'error'); return []; });
+  tbody.innerHTML = (list||[]).map(a => `<tr>
+    <td>${escHtml_(a.wrongBeneficiaryName)} (${a.payeeType==='Employee'?'UE':'Non-UE'})</td>
+    <td>${billIdLink(a.originalEntryId)}</td><td>${billIdLink(a.redirectedToEntryId)}</td>
+    <td class="num">${num(a.taxAmount)}</td><td class="num">${num(a.amountAdjusted)}</td><td class="num">${num(a.remaining)}</td>
+    <td>${a.depositStatus==='Deposited' ? 'Deposited - adjust in upcoming bills' : 'Not Yet Deposited'}</td>
+    <td><button class="primary" onclick="recordFBRAdjustmentPrompt('${a.adjustmentId}', ${a.remaining})">Record Adjustment</button></td>
+  </tr>`).join('') || emptyRow(8);
+}
+async function recordFBRAdjustmentPrompt(adjustmentId, remaining){
+  const amountStr = prompt('How much have you reconciled with FBR for this item? (remaining: ' + num(remaining) + ')');
+  if (amountStr === null) return;
+  const amount = Number(amountStr);
+  if (!amount || amount <= 0){ toast('Enter a valid amount.', 'error'); return; }
+  const notes = prompt('Notes (optional):') || '';
+  const res = await runAction(null, 'Recording...', 'Adjustment recorded.',
+    () => gs('recordFBRTaxAdjustment', adjustmentId, amount, notes, CURRENT_USER.username));
+  if (res && res.success) loadFBRTaxAdjustments();
+}
+
+/* =================================================================
+   FIXES THAT REPLACE EARLIER FUNCTIONS FROM Scripts.html
+   (a later definition replaces the earlier one with the same name)
+   ================================================================= */
+
+/* Badge numbers: only ask the server for COUNTS, and only for the tabs this person can see. */
+function refreshBadges(){
+  if (!CURRENT_USER) return;
+  const tabs = ROLE_TABS[CURRENT_USER.role] || [];
+  if (tabs.includes('processing') || tabs.includes('passing') || tabs.includes('payment')){
+    gs('getPipelineCounts', '').then(counts=>{
+      setBadge('processing', counts.Received);
+      setBadge('passing', counts.Processed);
+      setBadge('payment', counts.Passed);
+    }).catch(()=>{});
+  }
+  if (tabs.includes('diary')){
+    if (CURRENT_USER.role === 'DiaryClerk'){
+      gs('getPendingDiaryItems', { minDaysWaiting: 10 }, CURRENT_USER.username).then(list => setBadge('diary', list.length)).catch(()=>{});
+    } else {
+      gs('getUserDiaryQueue', CURRENT_USER.username, {}).then(list => setBadge('diary', list.length)).catch(()=>{});
+    }
+  }
+  if (tabs.includes('paymentconfirm')){
+    gs('getPaymentConfirmCount', '').then(n => setBadge('paymentconfirm', n)).catch(()=>{});
+  }
+  if (tabs.includes('reconciliation')){
+    Promise.all([
+      gs('getNeedsCorrectionBills', '').catch(()=>[]),
+      gs('getLineLevelConfirmationQueue', '', true).catch(()=>[])
+    ]).then(([single, lines]) => setBadge('reconciliation', (single||[]).length + (lines||[]).length));
+  }
+}
+
+/* Vendor autofill: names containing an apostrophe (e.g. Ali's Traders) used to break the suggestion list. */
+let VENDOR_SUGGESTIONS = [];
+function onVendorInput(){
+  clearTimeout(vendorTimeout);
+  const q = document.getElementById('e_vendor').value;
+  updateSecurityHeldDisplay();
+  if(q.length < 2){ document.getElementById('vendorSuggestions').style.display='none'; return; }
+  vendorTimeout = setTimeout(()=>{
+    gs('searchVendors', q).then(list=>{
+      VENDOR_SUGGESTIONS = list || [];
+      const box = document.getElementById('vendorSuggestions');
+      if(!VENDOR_SUGGESTIONS.length){ box.style.display='none'; return; }
+      box.innerHTML = VENDOR_SUGGESTIONS.map((v,i)=>`<div onclick="pickVendorByIndex(${i})">${escHtml_(v.VendorName)} (${escHtml_(v.CNIC_NTN||'')})</div>`).join('');
+      box.style.display='block';
+    });
+  }, 250);
+}
+function pickVendorByIndex(i){
+  const v = VENDOR_SUGGESTIONS[i];
+  if (v) pickVendor(v);
+}
+
+/* Admin tables: Edit buttons now work for names/labels containing apostrophes or quotes. */
+async function loadAllocations(){
+  const filters = {
+    campusId: document.getElementById('alloc_campus').value,
+    fy: document.getElementById('alloc_fy').value,
+    headQuery: document.getElementById('alloc_query').value
+  };
+  const res = await runAction(document.getElementById('btnLoadAlloc'), 'Loading...', 'Loaded.', () => gs('searchAllocations', filters));
+  if (!Array.isArray(res)) return;
+  document.querySelector('#allocTable tbody').innerHTML = res.map(a =>
+    `<tr><td>${escHtml_(a.CampusName)}</td><td>${escHtml_(a.HeadCode)}</td><td>${escHtml_(a.HeadName)}</td><td>${escHtml_(a.FY)}</td><td>${num(a.AllocatedAmount)}</td>
+     <td><button class="secondary" onclick="editAllocationRow(${attrJson_(a)})">Edit</button>
+     <button class="secondary" onclick="deleteAllocationRow(${attrJson_(a.CampusID)},${attrJson_(a.HeadID)},${attrJson_(a.FY)})">Delete</button></td></tr>`).join('') || emptyRow(6);
+}
+async function loadBudgetHeadsAdmin(){
+  const query = document.getElementById('bh_query').value;
+  const res = await runAction(document.getElementById('btnLoadHeads'), 'Loading...', 'Loaded.', () => gs('searchBudgetHeads', query));
+  if (!Array.isArray(res)) return;
+  document.querySelector('#headsTable tbody').innerHTML = res.map(h =>
+    `<tr><td>${escHtml_(h.HeadCode)}</td><td>${escHtml_(h.HeadName)}${h.Active===false||h.Active==='FALSE'?' (inactive)':''}</td>
+     <td><button class="secondary" onclick="editBudgetHeadRow(${attrJson_(h.HeadID)},${attrJson_(h.HeadCode)},${attrJson_(h.HeadName)})">Edit</button>
+     <button class="secondary" onclick="deleteBudgetHeadRow(${attrJson_(h.HeadID)})">Deactivate</button></td></tr>`).join('') || emptyRow(3);
+}
+async function loadSlabs(){
+  const slabs = await gs('getTaxSlabs');
+  document.querySelector('#slabsTable tbody').innerHTML = slabs.map(s =>
+    `<tr><td>${num(s.threshold)}</td><td>${num(s.fixedAmount)}</td><td>${(s.rate*100).toFixed(2)}%</td><td>${escHtml_(s.label||'')}</td>
+     <td><button class="secondary" onclick="editSlabRow(${attrJson_(s)})">Edit</button>
+     <button class="secondary" onclick="deleteSlabRow(${s.threshold})">Delete</button></td></tr>`).join('') || emptyRow(5);
+}
+
+/* =================================================================
+   SESSION SECURITY (replaces gs / doLogin / logout / window.onload from Scripts.html)
+   Every server call now carries the secret session token; the server
+   decides who you are from it, never from the username the page sends.
+   ================================================================= */
+let SESSION_TOKEN = sessionStorage.getItem('cbs_token') || null;
+let SESSION_ENDED_HANDLED_ = false;
+
+function forceRelogin_(){
+  if (SESSION_ENDED_HANDLED_) return;
+  SESSION_ENDED_HANDLED_ = true;
+  sessionStorage.removeItem('cbs_user');
+  sessionStorage.removeItem('cbs_token');
+  alert('Your session has ended or is no longer valid. Please log in again.');
+  location.reload();
+}
+
+function gs(fnName, ...args){
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(resolve)
+      .withFailureHandler(e => {
+        const msg = (e && e.message) ? e.message : String(e);
+        if (/SESSION_EXPIRED|SESSION_REQUIRED/.test(msg)) forceRelogin_();
+        reject(new Error(msg));
+      })
+      .apiCall(SESSION_TOKEN, fnName, args);
+  });
+}
+
+function doLogin(){
+  const u = document.getElementById('loginUser').value.trim();
+  const p = document.getElementById('loginPass').value;
+  const msgEl = document.getElementById('loginMsg');
+  msgEl.innerText = '';
+  const btn = document.querySelector('#loginScreen button.primary');
+  if (btn) btn.disabled = true;
+  google.script.run
+    .withSuccessHandler(res => {
+      if (btn) btn.disabled = false;
+      if (!res || !res.success){ msgEl.innerText = (res && res.message) || 'Login failed.'; return; }
+      SESSION_TOKEN = res.token;
+      SESSION_ENDED_HANDLED_ = false;
+      CURRENT_USER = { success:true, username:res.username, fullName:res.fullName, role:res.role };
+      sessionStorage.setItem('cbs_user', JSON.stringify(CURRENT_USER));
+      sessionStorage.setItem('cbs_token', SESSION_TOKEN);
+      document.getElementById('loginPass').value = '';
+      enterApp();
+      if (res.weakPassword){
+        alert('You are still using the default password (admin123). Please change it now - the Change Password window will open.');
+        showPasswordChange();
+      }
+    })
+    .withFailureHandler(e => {
+      if (btn) btn.disabled = false;
+      msgEl.innerText = (e && e.message) ? e.message : String(e);
+    })
+    .apiLogin(u, p);
+}
+
+function logout(){
+  const t = SESSION_TOKEN;
+  sessionStorage.removeItem('cbs_user');
+  sessionStorage.removeItem('cbs_token');
+  SESSION_TOKEN = null;
+  const done = () => location.reload();
+  if (!t){ done(); return; }
+  google.script.run.withSuccessHandler(done).withFailureHandler(done).apiLogout(t);
+}
+
+window.onload = function(){
+  const saved = sessionStorage.getItem('cbs_user');
+  if (saved && SESSION_TOKEN){
+    CURRENT_USER = JSON.parse(saved);
+    enterApp();
+  } else {
+    sessionStorage.removeItem('cbs_user');
+  }
+};
+(function(){
+  const passBox = document.getElementById('loginPass');
+  if (passBox) passBox.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+})();
+
+/* =================================================================
+   DUPLICATE PAYMENT RECOVERY (Admin screen + New Entry hooks)
+   ================================================================= */
+(function installRecoveryAdminCard_(){
+  const panel = document.getElementById('tab-admin');
+  if (!panel || document.getElementById('adm-recovery')) return;
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.id = 'adm-recovery';
+  card.innerHTML =
+    '<h3>Recover Duplicate Payments</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">' +
+    'Use this when beneficiaries were paid <b>twice by mistake outside this system</b> (for example a bank batch run twice). ' +
+    'Enter the Bill ID(s) that were paid twice, or the IBFT Batch ID (e.g. B12) to pick up every bill in it. A bulk bill\'s ID lists every beneficiary in it; ' +
+    'one beneficiary can be entered as E1042-3. Each beneficiary\'s extra amount is then deducted automatically from the <b>Net Amount</b> of their next bill(s) ' +
+    '(tax is still calculated as usual), bill after bill, until fully recovered. ' +
+    'The original bill and the budget are never touched, and nothing is booked for the second payment.</p>' +
+    '<div class="field"><label>Bill IDs / Line IDs / Batch ID (separate with commas or new lines)</label>' +
+    '<textarea id="rc_ids" rows="3" style="resize:vertical;" placeholder="e.g. B12   or   E1042, E1043-2"></textarea></div>' +
+    '<button class="secondary" id="btnRcFind" onclick="findRecoverySources()">Find Payments</button>' +
+    '<div id="rc_warnings" style="margin-top:8px;font-size:12.5px;color:var(--amber);"></div>' +
+    '<div id="rc_foundWrap" style="display:none;margin-top:10px;">' +
+      '<div class="table-wrap"><table id="rcFoundTable"><thead><tr><th></th><th>Bill / Line ID</th><th>Beneficiary</th><th>Type</th><th>IBAN</th>' +
+      '<th class="num">Net Paid</th><th class="num">Amount Paid Twice</th><th>Note</th></tr></thead><tbody></tbody></table></div>' +
+      '<div class="row" style="margin-top:10px;align-items:flex-end;">' +
+        '<div class="field"><label>Notes (optional)</label><input type="text" id="rc_notes" placeholder="e.g. Batch B12 run twice on bank portal, 11-Oct-2026"></div>' +
+        '<div class="field" style="flex:0 0 auto;"><button class="primary" id="btnRcRegister" onclick="registerRecoveries()">Register Recovery</button></div>' +
+      '</div>' +
+    '</div>' +
+    '<h3 style="margin-top:22px;font-size:13px;">Recovery Records</h3>' +
+    '<div class="row">' +
+      '<div class="field" style="max-width:200px;"><label>Show</label><select id="rc_status"><option value="Open">Open (still to recover)</option><option value="">All</option><option value="Recovered">Fully Recovered</option><option value="Cancelled">Cancelled</option></select></div>' +
+      '<div class="field"><label>Name / Bill ID / IBAN contains</label><input type="text" id="rc_query"></div>' +
+      '<div class="field" style="align-self:flex-end;"><button class="primary" id="btnRcLoad" onclick="loadRecoveries()">Load</button></div>' +
+    '</div>' +
+    '<div id="rc_summary" style="font-size:13px;color:var(--text-muted);margin:6px 0;"></div>' +
+    '<div class="table-wrap"><table id="rcTable"><thead><tr><th>Record</th><th>Paid-Twice Bill</th><th>Beneficiary</th><th class="num">Paid Twice</th>' +
+    '<th class="num">Recovered</th><th class="num">Outstanding</th><th>Status</th><th>Recovered Through</th><th></th></tr></thead>' +
+    '<tbody><tr><td colspan="9" style="text-align:center;color:var(--text-muted);">Click Load.</td></tr></tbody></table></div>';
+  panel.appendChild(card);
+  const grp = document.querySelector('#adminQuickNav optgroup[label="Bill Management"]');
+  if (grp){
+    const o = document.createElement('option');
+    o.value = 'adm-recovery'; o.textContent = 'Recover Duplicate Payments';
+    grp.appendChild(o);
+  }
+})();
+
+let RECOVERY_FOUND = [];
+async function findRecoverySources(){
+  const text = document.getElementById('rc_ids').value.trim();
+  if (!text){ toast('Enter at least one Bill ID or Batch ID.', 'error'); return; }
+  document.getElementById('rc_warnings').innerHTML = '';
+  document.getElementById('rc_foundWrap').style.display = 'none';
+  const res = await runAction(document.getElementById('btnRcFind'), 'Looking up payments...', null,
+    () => gs('lookupRecoverySources', text, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  RECOVERY_FOUND = res.items || [];
+  document.getElementById('rc_warnings').innerHTML = (res.warnings || []).map(w => '&bull; ' + escHtml_(w)).join('<br>');
+  document.querySelector('#rcFoundTable tbody').innerHTML = RECOVERY_FOUND.map((it, i) => `<tr>
+    <td><input type="checkbox" id="rc_chk_${i}" ${it.alreadyRegistered ? 'disabled' : 'checked'} style="width:auto;"></td>
+    <td>${billIdLink(it.sourceId)}</td><td>${escHtml_(it.name)}</td><td>${escHtml_(payeeTypeLabel_(it.payeeType))}</td><td>${escHtml_(it.iban)}</td>
+    <td class="num">${num(it.netPaid)}</td>
+    <td class="num"><input type="number" id="rc_amt_${i}" value="${it.netPaid}" min="1" max="${it.netPaid}" style="width:130px;" ${it.alreadyRegistered ? 'disabled' : ''}></td>
+    <td>${it.alreadyRegistered ? '<span style="color:var(--amber);">Already registered</span>' : ''}</td></tr>`).join('');
+  document.getElementById('rc_foundWrap').style.display = '';
+}
+async function registerRecoveries(){
+  const items = [];
+  let total = 0;
+  RECOVERY_FOUND.forEach((it, i) => {
+    const cb = document.getElementById('rc_chk_' + i);
+    if (!cb || !cb.checked || cb.disabled) return;
+    const amount = Number(document.getElementById('rc_amt_' + i).value) || 0;
+    items.push({ sourceId: it.sourceId, amount: amount });
+    total += amount;
+  });
+  if (!items.length){ toast('Tick at least one beneficiary.', 'error'); return; }
+  if (!confirm('Register ' + items.length + ' recovery record(s), total ' + num(total) + '? From now on this will be deducted automatically from these beneficiaries\' next bills. The original bills and the budget are not touched.')) return;
+  const res = await runAction(document.getElementById('btnRcRegister'), 'Saving...', null,
+    () => gs('createDuplicateRecoveries', items, document.getElementById('rc_notes').value.trim(), CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  toast(res.created + ' recovery record(s) registered, total ' + num(res.totalAmount) + '.', 'success');
+  if (res.skipped && res.skipped.length) toast('Skipped: ' + res.skipped.join(' | '), 'error');
+  document.getElementById('rc_ids').value = '';
+  document.getElementById('rc_notes').value = '';
+  document.getElementById('rc_foundWrap').style.display = 'none';
+  document.getElementById('rc_warnings').innerHTML = '';
+  RECOVERY_FOUND = [];
+  document.getElementById('rc_status').value = 'Open';
+  loadRecoveries();
+}
+async function loadRecoveries(){
+  const filters = { status: document.getElementById('rc_status').value, query: document.getElementById('rc_query').value };
+  const res = await runAction(document.getElementById('btnRcLoad'), 'Loading...', null,
+    () => gs('getDuplicateRecoveries', filters, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  document.getElementById('rc_summary').innerHTML = 'Total still to be recovered (all records): <b>' + num(res.totalOutstanding) + '</b>';
+  document.querySelector('#rcTable tbody').innerHTML = (res.rows || []).map(r => {
+    const through = (r.applications || []).map(a => billIdLink(a.entryId) + ' (' + num(a.amount) + ')').join(', ') || '-';
+    const color = r.status === 'Open' ? 'var(--amber)' : (r.status === 'Recovered' ? 'var(--accent)' : 'var(--text-muted)');
+    return `<tr><td>${escHtml_(r.recoveryId)}</td><td>${billIdLink(r.sourceEntryId)}</td>
+      <td>${escHtml_(r.name)} (${escHtml_(payeeTypeLabel_(r.payeeType))})</td>
+      <td class="num">${num(r.amountPaidTwice)}</td><td class="num">${num(r.recovered)}</td><td class="num">${num(r.outstanding)}</td>
+      <td style="color:${color};font-weight:700;">${r.status}</td><td style="white-space:normal;min-width:180px;">${through}</td>
+      <td>${r.status === 'Open' ? `<button class="secondary" style="color:var(--danger);" onclick="cancelRecovery(${attrJson_(r.recoveryId)})">Cancel</button>` : ''}</td></tr>`;
+  }).join('') || emptyRow(9);
+}
+async function cancelRecovery(recoveryId){
+  const reason = prompt('Stop recovering ' + recoveryId + '? No further deductions will be made (amounts already deducted from earlier bills stay deducted).\n\nReason (kept on record):');
+  if (reason === null) return;
+  const res = await runAction(null, 'Cancelling...', 'Recovery cancelled.', () => gs('cancelDuplicateRecovery', recoveryId, reason, CURRENT_USER.username));
+  if (res && res.success) loadRecoveries();
+}
+
+/* ---- New Entry: live preview, save confirmation, bulk toast, audit view ---- */
+(function installRecoveryHooks_(){
+  // Preview asks for the recovery-aware calculation and shows an extra row when something is being recovered.
+  const origGs = window.gs;
+  const REFRESH_PREVIEW_AFTER = { getEmployeeById:1, getNonUEEmployeeByCNIC:1, getStudentById:1, getVendorByCNIC:1 };
+  window.gs = function(fnName){
+    const args = Array.prototype.slice.call(arguments, 1);
+    if (fnName === 'previewTaxCalculation') fnName = 'previewTaxCalculationWithRecovery';
+    const p = origGs.apply(this, [fnName].concat(args));
+    if (fnName === 'previewTaxCalculationWithRecovery') p.then(updateRecoveryPreviewRow_).catch(function(){});
+    if (REFRESH_PREVIEW_AFTER[fnName]) p.then(function(){ setTimeout(function(){ if (window.updateTaxPreview) window.updateTaxPreview(); }, 80); }).catch(function(){});
+    if (fnName === 'submitBulkEntry') p.then(function(res){
+      if (res && res.success && Number(res.recoveryDeducted) > 0) toast('Duplicate-payment recovery of ' + num(res.recoveryDeducted) + ' was deducted from beneficiaries in this bulk bill.', 'success');
+    }).catch(function(){});
+    return p;
+  };
+  const origCollect = window.collectTaxParams;
+  window.collectTaxParams = function(){
+    const p = origCollect();
+    const t = p.payeeType;
+    const val = function(id){ const el = document.getElementById(id); return el ? el.value : ''; };
+    p.vendorName = resolvedPayeeName();
+    p.studentId = String(val('e_studentid')).trim();
+    p.iban = t === 'Employee' ? val('e_empiban') : (t === 'NonUEEmployee' ? val('e_nonue_iban') : (t === 'Student' ? val('e_beneficiaryIban') : val('e_iban')));
+    p.recoveryExcludeEntryId = (typeof CURRENT_EDIT_ENTRY_ID !== 'undefined' && CURRENT_EDIT_ENTRY_ID) ? CURRENT_EDIT_ENTRY_ID : '';
+    return p;
+  };
+  ['e_employeeid','e_vendor','e_cnic','e_iban','e_nonue_cnic','e_nonue_iban','e_studentid','e_beneficiaryIban'].forEach(function(id){
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('input', function(){ if (window.updateTaxPreview) window.updateTaxPreview(); });
+  });
+  window.updateRecoveryPreviewRow_ = function(tax){
+    const tbody = document.querySelector('#taxPreviewTable tbody');
+    if (!tbody) return;
+    let tr = document.getElementById('tp_recoveryRow');
+    if (!tr){
+      tr = document.createElement('tr');
+      tr.id = 'tp_recoveryRow';
+      tr.innerHTML = '<td>Duplicate Payment Recovery</td><td id="tp_recnote">-</td><td>-</td><td id="tp_recamt">0</td>';
+      tbody.appendChild(tr);
+    }
+    const amt = Number(tax && tax.recoveryDeducted) || 0;
+    tr.style.display = amt > 0 ? '' : 'none';
+    document.getElementById('tp_recamt').innerText = num(amt);
+    document.getElementById('tp_recnote').innerText = 'Owed back before this bill: ' + num((tax && tax.recoveryBalanceBefore) || 0);
+  };
+  // After saving a bill, say clearly if a recovery was taken from it.
+  const origConfirm = window.showBillConfirmation;
+  window.showBillConfirmation = function(res){
+    origConfirm(res);
+    const rec = Number(res && res.tax && res.tax.recoveryDeducted) || 0;
+    if (rec > 0){
+      document.getElementById('confirmContent').insertAdjacentHTML('beforeend',
+        '<div style="border:1px solid var(--amber);background:rgba(245,158,11,0.12);border-radius:8px;padding:12px;margin-top:6px;font-size:14px;line-height:1.5;">' +
+        '<b style="color:var(--amber);">Duplicate payment recovery:</b> ' + num(rec) + ' was deducted from this bill\'s net amount to recover an amount paid twice by mistake. ' +
+        'Net payable is now <b>' + num(res.tax.netAmount) + '</b>.</div>');
+    }
+  };
+  // Bill Audit View: show the recovery line just above the Net Amount.
+  const origBav = window.bavFinRow;
+  window.bavFinRow = function(label, sub, amount, opts){
+    let extra = '';
+    if (label === 'NET AMOUNT PAID' && window.__lastBillAuditData && window.__lastBillAuditData.bill){
+      const rec = Number(window.__lastBillAuditData.bill.RecoveryDeducted) || 0;
+      if (rec > 0) extra = origBav('Duplicate Payment Recovery', 'Deducted to recover an amount paid twice by mistake', rec, { negative: true });
+    }
+    return extra + origBav(label, sub, amount, opts);
+  };
+})();
+
+/* =================================================================
+   REPORTS: Recovery Statement (by Employee ID) + Bank Reconciliation
+   ================================================================= */
+(function installRecoveryReports_(){
+  const nav = document.querySelector('#tab-reports nav.subtabs');
+  const panel = document.getElementById('tab-reports');
+  if (!nav || !panel || document.getElementById('sub-rep13')) return;
+  [['rep13','Recovery Statement',''],['rep14','Bank Reconciliation','initBankRec_()']].forEach(function(b){
+    const btn = document.createElement('button');
+    btn.className = 'sub-btn';
+    btn.textContent = b[1];
+    btn.setAttribute('onclick', "showSubTab('" + b[0] + "', event);" + b[2]);
+    nav.appendChild(btn);
+  });
+
+  const rs = document.createElement('div');
+  rs.id = 'sub-rep13'; rs.className = 'subpanel';
+  rs.innerHTML =
+    '<div class="card no-print"><h3>Duplicate-Payment Recovery Statement</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">For one employee: every amount paid twice by mistake, each deduction made so far from later bills, the amount recovered, and the balance still to recover.</p>' +
+    '<div class="row"><div class="field"><label>Employee ID (or CNIC / Student ID)</label><input type="text" id="rs_key"></div>' +
+    '<div class="field" style="align-self:flex-end;"><button class="primary" id="btnRsGo" onclick="loadRecoveryStatement()">Generate</button> ' +
+    '<button class="secondary" id="btnRsCsv" onclick="downloadRecoveryStatementCSV()" style="display:none;">Download CSV</button> ' +
+    '<button class="secondary" id="btnRsPdf" onclick="downloadRecoveryStatementPDF()" style="display:none;">Download PDF</button> ' +
+    '<button class="secondary" onclick="window.print()">Print</button></div></div></div>' +
+    '<div class="card"><div id="rs_result"></div></div>';
+  panel.appendChild(rs);
+
+  const br = document.createElement('div');
+  br.id = 'sub-rep14'; br.className = 'subpanel';
+  br.innerHTML =
+    '<div class="card no-print"><h3>Bank Reconciliation</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">Every payment sent to the bank (bulk bills shown beneficiary by beneficiary). <b>Net Amount</b> is what should have left the bank for that person. ' +
+    'Pick the bank account and payment dates, click Load, then search, choose columns and download.</p>' +
+    '<div class="row">' +
+    '<div class="field"><label>Paid From Bank Account</label><select id="br_account"><option value="">All Accounts</option></select></div>' +
+    '<div class="field"><label>Payment Date From</label><input type="date" id="br_from"></div>' +
+    '<div class="field"><label>Payment Date To</label><input type="date" id="br_to"></div>' +
+    '<div class="field"><label>Payment Status</label><select id="br_status"><option value="">All</option><option>Submitted</option><option>Confirmed</option><option>Failed</option><option>Isolated</option></select></div></div>' +
+    '<button class="primary" id="btnBrLoad" onclick="loadBankRec()">Load</button> ' +
+    '<button class="secondary" onclick="document.getElementById(\'br_colPicker\').style.display = document.getElementById(\'br_colPicker\').style.display===\'none\'?\'block\':\'none\';">Column Picker</button> ' +
+    '<button class="secondary" onclick="downloadBankRecCSV()">Download CSV</button> ' +
+    '<button class="secondary" onclick="window.print()">Print</button>' +
+    '<div id="br_colPicker" style="display:none;margin-top:10px;"><label>Columns <label style="display:inline;font-weight:normal;"><input type="checkbox" id="br_selectAll" onclick="toggleAll(\'br_columns\', this.checked); renderBankRec();" style="width:auto;"> Select All</label></label>' +
+    '<div class="checklist" id="br_columns"></div></div>' +
+    '<div class="row" style="margin-top:10px;"><div class="field"><label>Search (anything in the loaded rows)</label><input type="text" id="br_search" oninput="renderBankRec()" placeholder="name, CNIC, IBAN, bill ID, batch, status, amount ..."></div></div></div>' +
+    '<div class="card"><div id="br_summary" style="font-size:13px;margin-bottom:8px;"></div><div class="table-wrap"><table id="brTable"><thead><tr id="brHeadRow"></tr></thead>' +
+    '<tbody><tr><td style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody></table></div></div>';
+  panel.appendChild(br);
+})();
+
+/* ---------- Recovery Statement ---------- */
+let RS_LAST = null;
+function rsFlatRows_(){
+  const rows = [];
+  RS_LAST.records.forEach(function(r){
+    const base = { recoveryId:r.recoveryId, status:r.status, sourceBill:r.sourceEntryId, sourceBatch:r.sourceBatch, sourcePaidDate:r.sourcePaidDate,
+      sourceNetPaid:r.sourceNetPaid, amountPaidTwice:r.amountPaidTwice, recordRecovered:r.recovered, recordBalance:r.outstanding };
+    if (!r.applications.length) rows.push(Object.assign({}, base, { appBill:'', appDate:'', appStatus:'', appGross:'', appNet:'', appAmount:'', counted:'' }));
+    r.applications.forEach(function(a){
+      rows.push(Object.assign({}, base, { appBill:a.entryId, appDate:a.billDate, appStatus:a.billStatus, appGross:a.billGross, appNet:a.billNetAfterRecovery,
+        appAmount:a.amount, counted:a.counted ? 'Yes' : 'No (bill cancelled/deleted)' }));
+    });
+  });
+  return rows;
+}
+const RS_COLUMNS = [['recoveryId','Record'],['status','Record Status'],['sourceBill','Paid-Twice Bill'],['sourceBatch','Batch'],['sourcePaidDate','Paid Date'],
+  ['sourceNetPaid','Net Paid Originally'],['amountPaidTwice','Amount Paid Twice'],['appBill','Recovered From Bill'],['appDate','Bill Date'],['appStatus','Bill Status'],
+  ['appGross','Bill Gross'],['appNet','Bill Net After Recovery'],['appAmount','Amount Recovered'],['counted','Counted'],['recordRecovered','Record Recovered So Far'],['recordBalance','Record Balance']];
+async function loadRecoveryStatement(){
+  const key = document.getElementById('rs_key').value.trim();
+  if (!key){ toast('Enter an Employee ID.', 'error'); return; }
+  const res = await runAction(document.getElementById('btnRsGo'), 'Building statement...', null, () => gs('getRecoveryStatement', key, CURRENT_USER.username));
+  const wrap = document.getElementById('rs_result');
+  if (!res || res.success === false){
+    wrap.innerHTML = '<p class="error">' + escHtml_((res && res.message) || 'Could not build the statement.') + '</p>';
+    document.getElementById('btnRsCsv').style.display = 'none'; document.getElementById('btnRsPdf').style.display = 'none';
+    RS_LAST = null; return;
+  }
+  RS_LAST = res;
+  const t = res.totals;
+  let html = '<div style="border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">' +
+    '<div style="font-weight:700;color:var(--accent);margin-bottom:8px;font-size:15px;">' + escHtml_(res.name) + (res.designation ? ' - ' + escHtml_(res.designation) : '') + ' (' + escHtml_(res.key) + ')</div>' +
+    '<div class="row" style="gap:24px;">' +
+    '<div><span style="color:var(--text-muted);">Total Paid Twice</span><br><b>' + num(t.paidTwice) + '</b></div>' +
+    '<div><span style="color:var(--text-muted);">Recovered So Far</span><br><b style="color:var(--accent);">' + num(t.recovered) + '</b></div>' +
+    '<div><span style="color:var(--text-muted);">Balance Still To Recover</span><br><b style="color:' + (t.outstanding > 0 ? 'var(--danger)' : 'var(--accent)') + ';">' + num(t.outstanding) + '</b></div></div></div>';
+  res.records.forEach(function(r){
+    const rows = r.applications.map(function(a){
+      return '<tr' + (a.counted ? '' : ' style="opacity:0.55;"') + '><td>' + billIdLink(a.entryId) + '</td><td>' + escHtml_(a.billDate) + '</td><td>' + escHtml_(a.nature) + '</td>' +
+        '<td class="num">' + num(a.billGross) + '</td><td class="num">' + num(a.billNetAfterRecovery) + '</td><td class="num">' + num(a.amount) + '</td>' +
+        '<td>' + escHtml_(a.billStatus) + (a.counted ? '' : ' - not counted') + '</td></tr>';
+    }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Nothing recovered yet.</td></tr>';
+    html += '<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;">' +
+      '<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;"><div><b>' + escHtml_(r.recoveryId) + '</b> - paid twice on bill ' + billIdLink(r.sourceEntryId) +
+      (r.sourceBatch ? ' (batch ' + escHtml_(r.sourceBatch) + ')' : '') + (r.sourcePaidDate ? ', paid ' + escHtml_(r.sourcePaidDate) : '') + '</div>' +
+      '<div><b>' + escHtml_(r.status) + '</b></div></div>' +
+      '<div style="font-size:12.5px;color:var(--text-muted);margin:4px 0;">Net originally paid: ' + num(r.sourceNetPaid) + ' &nbsp;|&nbsp; Paid twice: <b>' + num(r.amountPaidTwice) + '</b> &nbsp;|&nbsp; Recovered: <b>' + num(r.recovered) +
+      '</b> &nbsp;|&nbsp; Balance: <b>' + num(r.outstanding) + '</b>' + (r.notes ? ' &nbsp;|&nbsp; Notes: ' + escHtml_(r.notes) : '') +
+      (r.cancelReason ? ' &nbsp;|&nbsp; Cancelled: ' + escHtml_(r.cancelReason) : '') + '</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Recovered From Bill</th><th>Bill Date</th><th>Nature</th><th class="num">Bill Gross</th><th class="num">Bill Net After Recovery</th><th class="num">Amount Recovered</th><th>Bill Status</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+  });
+  wrap.innerHTML = html;
+  document.getElementById('btnRsCsv').style.display = ''; document.getElementById('btnRsPdf').style.display = '';
+}
+function downloadRecoveryStatementCSV(){
+  if (!RS_LAST){ toast('Generate the statement first.', 'error'); return; }
+  exportArrayToCSV(rsFlatRows_(), RS_COLUMNS, 'Recovery_Statement_' + RS_LAST.key.replace(/[^\w-]/g, '_') + '.csv');
+}
+function downloadRecoveryStatementPDF(){
+  if (!RS_LAST){ toast('Generate the statement first.', 'error'); return; }
+  const res = RS_LAST, t = res.totals;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+  doc.setFont('helvetica','bold'); doc.setFontSize(14);
+  doc.text('Duplicate-Payment Recovery Statement', 30, 30);
+  doc.setFont('helvetica','normal'); doc.setFontSize(10);
+  doc.text(res.name + (res.designation ? ' - ' + res.designation : '') + ' (' + res.key + ')', 30, 46);
+  doc.text('Total Paid Twice: ' + num(t.paidTwice) + '   |   Recovered So Far: ' + num(t.recovered) + '   |   Balance Still To Recover: ' + num(t.outstanding), 30, 62);
+  const money = { sourceNetPaid:1, amountPaidTwice:1, appGross:1, appNet:1, appAmount:1, recordRecovered:1, recordBalance:1 };
+  const body = rsFlatRows_().map(r => RS_COLUMNS.map(c => (money[c[0]] && r[c[0]] !== '') ? num(r[c[0]]) : r[c[0]]));
+  const cs = {};
+  RS_COLUMNS.forEach((c, i) => { if (money[c[0]]) cs[i] = { halign:'right' }; });
+  doc.autoTable({ head:[RS_COLUMNS.map(c => c[1])], body: body, startY: 76, styles:{ fontSize:7, cellPadding:2, overflow:'linebreak' },
+    headStyles:{ fillColor:[28,61,90], textColor:255 }, columnStyles: cs, margin:{ left:20, right:20 } });
+  doc.save('Recovery_Statement_' + res.key.replace(/[^\w-]/g, '_') + '.pdf');
+}
+
+/* ---------- Bank Reconciliation ---------- */
+// [key, label, visibleByDefault, isAmount]
+const BR_COLUMNS = [
+  ['paymentDate','Payment Date',true,false],['batchId','Batch',true,false],['billId','Bill / Line ID',true,false],
+  ['payFromAccount','Paid From Account',true,false],['accountNo','Account No.',false,false],
+  ['beneficiary','Beneficiary',true,false],['employeeId','Employee ID',false,false],['cnicNtn','CNIC / NTN',false,false],['iban','IBAN',true,false],['bankShortName','Bank Code',false,false],
+  ['billNature','Bill Nature',false,false],['description','Description',false,false],['fy','FY',false,false],['campus','Campus',false,false],
+  ['gross','Gross Amount',false,true],['incomeTax','Income Tax',false,true],['salesTax','Sales Tax',false,true],['pst','Punjab Sales Tax',false,true],
+  ['security','Security',false,true],['penalty','Penalty',false,true],['otherDeduction','Other Deduction',false,true],['recovery','Duplicate-Payment Recovery',false,true],
+  ['net','Net Amount',true,true],['paymentStatus','Payment Status',true,false],['confirmedDate','Confirmed Date',false,false],['failureReason','Failure Reason',false,false],
+  ['inBankFile','In Bank File',false,false],['billStatus','Bill Status',false,false],['notes','Notes',false,false]
+];
+let BR_ROWS = [];
+let BR_INIT_DONE = false;
+function initBankRec_(){
+  if (!BR_INIT_DONE){
+    BR_INIT_DONE = true;
+    document.getElementById('br_columns').innerHTML = BR_COLUMNS.map(function(c){
+      return '<label><input type="checkbox" class="brcol" value="' + c[0] + '" ' + (c[2] ? 'checked' : '') + ' onchange="renderBankRec()"> ' + c[1] + '</label>';
+    }).join('');
+  }
+  gs('getBankAccounts').then(function(list){
+    const sel = document.getElementById('br_account');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">All Accounts</option>' + (list || []).map(function(a){
+      return '<option value="' + escHtml_(a.AccountID) + '">' + escHtml_(a.AccountTitle + ' - ' + a.BankName + (a.AccountNumber ? ' (' + a.AccountNumber + ')' : '')) + '</option>';
+    }).join('');
+    sel.value = cur;
+  }).catch(function(){});
+}
+async function loadBankRec(){
+  const filters = { accountId: document.getElementById('br_account').value, fromDate: document.getElementById('br_from').value,
+    toDate: document.getElementById('br_to').value, paymentStatus: document.getElementById('br_status').value };
+  const res = await runAction(document.getElementById('btnBrLoad'), 'Loading payments...', null, () => gs('getBankReconciliationReport', filters, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  BR_ROWS = res.rows || [];
+  document.getElementById('br_search').value = '';
+  if (res.truncated) toast('Showing the first 20,000 of ' + res.totalMatched + ' payments - narrow the dates.', 'error');
+  renderBankRec();
+}
+function brVisibleRows_(){
+  const q = document.getElementById('br_search').value.trim().toLowerCase();
+  if (!q) return BR_ROWS;
+  return BR_ROWS.filter(function(r){
+    return Object.keys(r).some(function(k){ return String(r[k] === null || r[k] === undefined ? '' : r[k]).toLowerCase().indexOf(q) !== -1; });
+  });
+}
+function brSelectedCols_(){
+  return BR_COLUMNS.filter(function(c){ const el = document.querySelector('.brcol[value="' + c[0] + '"]'); return el && el.checked; });
+}
+function renderBankRec(){
+  if (!document.getElementById('br_columns').innerHTML) initBankRec_();
+  const cols = brSelectedCols_();
+  const rows = brVisibleRows_();
+  document.getElementById('brHeadRow').innerHTML = cols.map(function(c){ return '<th' + (c[3] ? ' class="num"' : '') + '>' + c[1] + '</th>'; }).join('');
+  document.querySelector('#brTable tbody').innerHTML = rows.map(function(r){
+    return '<tr>' + cols.map(function(c){
+      const v = r[c[0]];
+      if (c[3]) return '<td class="num">' + num(v) + '</td>';
+      if (c[0] === 'billId') return '<td>' + billIdLink(String(v)) + '</td>';
+      return '<td>' + escHtml_(v) + '</td>';
+    }).join('') + '</tr>';
+  }).join('') || '<tr><td colspan="' + Math.max(cols.length, 1) + '" style="text-align:center;color:var(--text-muted);">No payments match.</td></tr>';
+  const sum = function(pred){ return rows.filter(pred).reduce(function(s, r){ return s + Number(r.net || 0); }, 0); };
+  document.getElementById('br_summary').innerHTML = '<b>' + rows.length + '</b> payment(s) shown' + (rows.length !== BR_ROWS.length ? ' of ' + BR_ROWS.length + ' loaded' : '') +
+    ' &nbsp;|&nbsp; Total Net Amount: <b>' + num(sum(function(){ return true; })) + '</b>' +
+    ' &nbsp;|&nbsp; Confirmed: <b>' + num(sum(function(r){ return r.paymentStatus === 'Confirmed'; })) + '</b>' +
+    ' &nbsp;|&nbsp; Submitted (not yet confirmed): <b>' + num(sum(function(r){ return r.paymentStatus === 'Submitted'; })) + '</b>' +
+    ' &nbsp;|&nbsp; Failed / Isolated: <b>' + num(sum(function(r){ return r.paymentStatus === 'Failed' || r.paymentStatus === 'Isolated'; })) + '</b>';
+}
+function downloadBankRecCSV(){
+  const rows = brVisibleRows_();
+  if (!rows.length){ toast('Load the report first.', 'error'); return; }
+  const cols = brSelectedCols_();
+  if (!cols.length){ toast('Choose at least one column.', 'error'); return; }
+  exportArrayToCSV(rows, cols.map(function(c){ return [c[0], c[1]]; }), 'Bank_Reconciliation.csv');
+}
+
+/* ---- IBFT: tell the user when zero-net beneficiaries were left out of the bank file ---- */
+(function installZeroNetNotice_(){
+  const prev = window.gs;
+  window.gs = function(fnName){
+    const p = prev.apply(this, arguments);
+    if (fnName === 'markPaidAndGenerateIBFT') p.then(function(res){
+      if (res && res.success && res.zeroNetSkipped > 0) toast(res.zeroNetSkipped + ' beneficiary line(s) had a net of 0 (fully recovered) and were left out of the bank file.', 'success');
+    }).catch(function(){});
+    return p;
+  };
+})();
+
+/* =================================================================
+   DIARY TAB: sub-pages, layout, required-field marks
+   ================================================================= */
+(function installDiaryStyles_(){
+  const st = document.createElement('style');
+  st.textContent =
+    '.dysub{display:none}.dysub.active{display:block}' +
+    '#tab-diary{max-width:100%}' +
+    '#pendingDiaryTable{font-size:11.5px;width:100%}' +
+    '#pendingDiaryTable th,#pendingDiaryTable td{padding:2px 6px;white-space:normal;line-height:1.25;vertical-align:top}' +
+    '#pendingDiaryTable td.nowrap{white-space:nowrap}' +
+    '#pendingDiaryTable th{font-size:10px}';
+  document.head.appendChild(st);
+  // All Diary log fields are mandatory (letter attachment excepted) - mark them.
+  ['dy_date','dy_senderDate','dy_senderType','dy_vendorName','dy_employeeId','dy_nonueName','dy_nonueCnic','dy_senderOfficeName',
+   'dy_senderRef','dy_originatingOffice','dy_originatingOther','dy_desc','dy_assignee'].forEach(function(id){
+    const el = document.getElementById(id);
+    const lab = el && el.closest('.field') && el.closest('.field').querySelector('label');
+    if (lab && lab.textContent.indexOf('*') === -1) lab.textContent = lab.textContent + ' *';
+  });
+  const t = document.getElementById('dy_senderDate');
+  if (t) t.removeAttribute('title');
+})();
+
+function showDiarySub(name){
+  document.querySelectorAll('#tab-diary .dysub').forEach(function(p){ p.classList.toggle('active', p.id === 'dysub-' + name); });
+  document.querySelectorAll('#dy_subnav .sub-btn').forEach(function(b){ b.classList.toggle('active', b.getAttribute('data-sub') === name); });
+  if (name === 'held' || name === 'sent') { if (typeof loadHeldItems === 'function') loadHeldItems(); }
+  if (name === 'myqueue') loadMyDiaryQueue();
+  if (name === 'mypos') loadMyDiaryStageSummary();
+  if (name === 'pending') { buildPendingColumnPicker_(); renderPendingTable(); }
+  setTimeout(function(){ if (typeof refreshStickyScrollbars === 'function') refreshStickyScrollbars(); }, 200);
+}
+function initDiarySubtabs_(){
+  const nav = document.getElementById('dy_subnav');
+  if (!nav || !CURRENT_USER) return;
+  const role = CURRENT_USER.role;
+  const isClerk = (role === 'DiaryClerk' || role === 'Admin');
+  const isUser = (role !== 'DiaryClerk');
+  const items = [];
+  if (isClerk) items.push(['log','Log New Bill / Letter'], ['pending','Pending Diary Items'], ['held','Returned / On Hold'], ['sent','Sent to Other Offices']);
+  if (isUser) items.push(['mypos','My Diary Position'], ['myqueue','My Diary Queue']);
+  nav.innerHTML = items.map(function(i){ return '<button class="sub-btn" data-sub="' + i[0] + '" onclick="showDiarySub(\'' + i[0] + '\')">' + i[1] + '</button>'; }).join('');
+  if (items.length) showDiarySub(items[0][0]);
+}
+(function installDiaryHooks_(){
+  const prevEnter = window.enterApp;
+  window.enterApp = function(){ prevEnter.apply(this, arguments); initDiarySubtabs_(); };
+  const prevShow = window.showTab;
+  window.showTab = function(name){
+    prevShow.apply(this, arguments);
+    if (name === 'diary'){
+      const nav = document.getElementById('dy_subnav');
+      if (nav && !nav.children.length) initDiarySubtabs_();
+      setTimeout(function(){ if (typeof refreshStickyScrollbars === 'function') refreshStickyScrollbars(); }, 200);
+    }
+  };
+})();
+
+/* =================================================================
+   ADMIN: Diary numbers - edit / cancel / restore / de-link / link
+   ================================================================= */
+(function installDiaryAdminCard_(){
+  const panel = document.getElementById('tab-admin');
+  if (!panel || document.getElementById('adm-diarytools')) return;
+  const card = document.createElement('div');
+  card.className = 'card'; card.id = 'adm-diarytools';
+  card.innerHTML =
+    '<h3>Diary Numbers: Edit / Cancel / De-link / Link</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">Complete or correct a bill\'s cycle. <b>Edit</b> corrects a Diary entry\'s details. <b>Cancel</b> withdraws a Diary number that was logged by mistake (Restore reverses it). ' +
+    '<b>De-link</b> detaches a Diary number from the bill it was attached to (the Diary item goes back to Pending). <b>Link</b> attaches a Pending Bill-type Diary number to an existing bill ' +
+    '(a single bill carries one Diary number; a bulk bill can carry several). Every action needs a reason and is kept in the Diary trail.</p>' +
+    '<div class="row">' +
+    '<div class="field" style="max-width:170px;"><label>Diary No. contains</label><input type="text" id="ad_id"></div>' +
+    '<div class="field" style="max-width:170px;"><label>Linked Bill ID contains</label><input type="text" id="ad_bill"></div>' +
+    '<div class="field"><label>Sender / Description / Employee ID / Ref. contains</label><input type="text" id="ad_q"></div>' +
+    '<div class="field" style="max-width:170px;"><label>Status</label><select id="ad_status"><option value="">All</option><option>Pending</option><option>Entered</option><option>Returned</option><option>Closed</option><option>Cancelled</option></select></div>' +
+    '<div class="field" style="align-self:flex-end;"><button class="primary" id="btnAdLoad" onclick="loadAdminDiary()">Load</button></div></div>' +
+    '<div id="ad_count" style="font-size:12px;color:var(--text-muted);"></div>' +
+    '<div class="table-wrap" style="margin-top:8px;"><table id="adminDiaryTable"><thead><tr><th>Diary No.</th><th>Type</th><th>Date Received</th><th>Sender</th><th>Description</th><th class="num">Amount</th><th>Assigned To</th><th>Status</th><th>Linked Bill</th><th></th></tr></thead>' +
+    '<tbody><tr><td colspan="10" style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody></table></div>';
+  panel.appendChild(card);
+  const grp = document.querySelector('#adminQuickNav optgroup[label="Bill Management"]');
+  if (grp){ const o = document.createElement('option'); o.value = 'adm-diarytools'; o.textContent = 'Diary Numbers: Edit / Cancel / De-link / Link'; grp.appendChild(o); }
+
+  const modal = document.createElement('div');
+  modal.id = 'adEditModal';
+  modal.style.cssText = 'display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:107; padding:16px;';
+  modal.innerHTML =
+    '<div class="card" style="background:var(--navy-light); max-width:760px; width:100%; margin:0; max-height:92vh; overflow-y:auto;">' +
+    '<h3 style="margin-top:0;">Edit Diary Entry <span id="ae_id" style="color:var(--accent);"></span></h3>' +
+    '<div class="row"><div class="field"><label>Date Received *</label><input type="date" id="ae_date"></div>' +
+    '<div class="field"><label>Sender\'s Diary / Letter Date</label><input type="date" id="ae_senderDate"></div>' +
+    '<div class="field"><label>Reference / Diary No. of the Sender</label><input type="text" id="ae_ref"></div></div>' +
+    '<div class="row"><div class="field"><label>Sender Is</label><select id="ae_senderType" onchange="onAdEditSenderType()"><option value="Vendor">Vendor</option><option value="Employee">UE Employee</option><option value="NonUEEmployee">Non-UE Employee</option><option value="Office">Another Office</option></select></div>' +
+    '<div class="field" id="ae_vendorWrap"><label>Vendor / Name *</label><input type="text" id="ae_vendor"></div>' +
+    '<div class="field" id="ae_empWrap"><label>Employee ID *</label><input type="text" id="ae_emp"></div>' +
+    '<div class="field" id="ae_cnicWrap"><label>CNIC *</label><input type="text" id="ae_cnic"></div>' +
+    '<div class="field" id="ae_officeNameWrap"><label>Sender Office Name *</label><input type="text" id="ae_senderOffice"></div></div>' +
+    '<div class="row"><div class="field"><label>Originating Office *</label><select id="ae_office" onchange="onAdEditOffice()"></select></div>' +
+    '<div class="field" id="ae_officeOtherWrap" style="display:none;"><label>Originating Office Name *</label><input type="text" id="ae_officeOther"></div></div>' +
+    '<div class="row"><div class="field"><label>Description</label><input type="text" id="ae_desc"></div>' +
+    '<div class="field" id="ae_amountWrap"><label>Amount (Gross) *</label><input type="number" id="ae_amount" min="1"></div>' +
+    '<div class="field" id="ae_billTypeWrap"><label>Bill Type *</label><select id="ae_billType"><option value="Single">Single bill</option><option value="Bulk">Bulk bill</option></select></div></div>' +
+    '<div style="display:flex; gap:10px; margin-top:10px;"><button class="primary" style="flex:1;" onclick="saveAdminDiaryEdit()">Save Changes</button>' +
+    '<button class="secondary" style="flex:1;" onclick="document.getElementById(\'adEditModal\').style.display=\'none\'">Cancel</button></div></div>';
+  document.body.appendChild(modal);
+})();
+
+let AD_ROWS = [];
+let AD_EDIT_ID = '';
+async function loadAdminDiary(){
+  const filters = { diaryId: document.getElementById('ad_id').value.trim(), billId: document.getElementById('ad_bill').value.trim(),
+    query: document.getElementById('ad_q').value.trim(), status: document.getElementById('ad_status').value };
+  const res = await runAction(document.getElementById('btnAdLoad'), 'Loading...', null, () => gs('adminSearchDiary', filters, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  AD_ROWS = res.rows || [];
+  document.getElementById('ad_count').textContent = AD_ROWS.length + ' shown' + (res.total > AD_ROWS.length ? ' of ' + res.total + ' (narrow the filters to see the rest)' : '') + '.';
+  document.querySelector('#adminDiaryTable tbody').innerHTML = AD_ROWS.map(function(r, i){
+    const btns = [];
+    btns.push('<button class="secondary" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="openAdminDiaryEdit(' + i + ')">Edit</button>');
+    if (r.status === 'Cancelled') btns.push('<button class="secondary" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="adminDiaryRestore(' + i + ')">Restore</button>');
+    else if (!r.linkedEntryId && r.status !== 'Closed') btns.push('<button class="secondary" style="padding:1px 7px;font-size:11px;min-height:0;color:var(--danger);" onclick="adminDiaryCancel(' + i + ')">Cancel</button>');
+    if (r.linkedEntryId) btns.push('<button class="secondary" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="adminDiaryDelink(' + i + ')">De-link</button>');
+    else if (r.itemType === 'Bill' && r.status === 'Pending') btns.push('<button class="secondary" style="padding:1px 7px;font-size:11px;min-height:0;" onclick="adminDiaryLink(' + i + ')">Link to Bill</button>');
+    return '<tr><td>' + diaryIdLink(r.diaryId) + '</td><td>' + diaryTypeLabel({ itemType: r.itemType, billType: r.billType }) + '</td><td>' + fmtDate(r.dateReceived) + '</td><td>' + escHtml_(r.senderLabel) +
+      '</td><td style="white-space:normal;min-width:160px;">' + escHtml_(r.description) + '</td><td class="num">' + (r.amount != null ? num(r.amount) : '') + '</td><td>' + escHtml_(r.assignedTo) +
+      '</td><td>' + escHtml_(r.status) + '</td><td>' + (r.linkedEntryId ? billIdLink(r.linkedEntryId) : '-') + '</td><td style="white-space:nowrap;">' + btns.join(' ') + '</td></tr>';
+  }).join('') || emptyRow(10);
+}
+function onAdEditSenderType(){
+  const t = document.getElementById('ae_senderType').value;
+  document.getElementById('ae_vendorWrap').style.display = (t === 'Vendor' || t === 'NonUEEmployee') ? '' : 'none';
+  document.getElementById('ae_empWrap').style.display = t === 'Employee' ? '' : 'none';
+  document.getElementById('ae_cnicWrap').style.display = t === 'NonUEEmployee' ? '' : 'none';
+  document.getElementById('ae_officeNameWrap').style.display = t === 'Office' ? '' : 'none';
+}
+function onAdEditOffice(){ document.getElementById('ae_officeOtherWrap').style.display = document.getElementById('ae_office').value === '__others__' ? '' : 'none'; }
+async function openAdminDiaryEdit(i){
+  const r = AD_ROWS[i];
+  AD_EDIT_ID = r.diaryId;
+  document.getElementById('ae_id').textContent = r.diaryId;
+  const offices = await gs('getReceivingOffices').catch(function(){ return []; });
+  document.getElementById('ae_office').innerHTML = '<option value="">-- select --</option>' + offices.map(function(o){ return '<option value="' + escHtml_(o.OfficeID) + '">' + escHtml_(o.OfficeName) + '</option>'; }).join('') + '<option value="__others__">Others (type name)</option>';
+  document.getElementById('ae_office').value = r.originatingOfficeId || (r.originatingOfficeOther ? '__others__' : '');
+  document.getElementById('ae_officeOther').value = r.originatingOfficeOther || '';
+  onAdEditOffice();
+  document.getElementById('ae_date').value = r.dateReceived || '';
+  document.getElementById('ae_senderDate').value = r.senderReferenceDate || '';
+  document.getElementById('ae_ref').value = r.senderReferenceNo || '';
+  document.getElementById('ae_senderType').value = r.senderType || 'Vendor';
+  document.getElementById('ae_vendor').value = r.vendorName || '';
+  document.getElementById('ae_emp').value = r.employeeId || '';
+  document.getElementById('ae_cnic').value = r.cnic || '';
+  document.getElementById('ae_senderOffice').value = r.senderOfficeName || '';
+  document.getElementById('ae_desc').value = r.description || '';
+  document.getElementById('ae_amount').value = r.amount != null ? r.amount : '';
+  document.getElementById('ae_billType').value = r.billType || 'Single';
+  const isBill = r.itemType === 'Bill';
+  document.getElementById('ae_amountWrap').style.display = isBill ? '' : 'none';
+  document.getElementById('ae_billTypeWrap').style.display = isBill ? '' : 'none';
+  onAdEditSenderType();
+  document.getElementById('adEditModal').style.display = 'flex';
+}
+async function saveAdminDiaryEdit(){
+  const g = function(id){ return document.getElementById(id).value; };
+  const upd = { dateReceived: g('ae_date'), senderReferenceDate: g('ae_senderDate'), senderReferenceNo: g('ae_ref'), senderType: g('ae_senderType'),
+    vendorName: g('ae_vendor'), employeeId: g('ae_emp'), cnic: g('ae_cnic'), senderOfficeName: g('ae_senderOffice'),
+    originatingOfficeId: g('ae_office'), originatingOfficeOther: g('ae_officeOther'), roughDescription: g('ae_desc'), amount: g('ae_amount'), billType: g('ae_billType') };
+  const res = await runAction(null, 'Saving...', 'Diary entry updated.', () => gs('adminUpdateDiary', AD_EDIT_ID, upd, CURRENT_USER.username));
+  if (res && res.success){ document.getElementById('adEditModal').style.display = 'none'; loadAdminDiary(); }
+}
+async function adminDiaryCancel(i){
+  const r = AD_ROWS[i];
+  const reason = prompt('Cancel Diary number ' + r.diaryId + '? It will no longer appear in any queue or be enterable as a bill.\n\nReason (kept on the trail):');
+  if (reason === null) return;
+  const res = await runAction(null, 'Cancelling...', 'Diary number cancelled.', () => gs('adminCancelDiary', r.diaryId, reason, CURRENT_USER.username));
+  if (res && res.success){ loadAdminDiary(); refreshBadges(); }
+}
+async function adminDiaryRestore(i){
+  const r = AD_ROWS[i];
+  const reason = prompt('Restore Diary number ' + r.diaryId + ' to Pending?\n\nReason (optional):');
+  if (reason === null) return;
+  const res = await runAction(null, 'Restoring...', 'Diary number restored to Pending.', () => gs('adminRestoreDiary', r.diaryId, reason, CURRENT_USER.username));
+  if (res && res.success){ loadAdminDiary(); refreshBadges(); }
+}
+async function adminDiaryDelink(i){
+  const r = AD_ROWS[i];
+  const reason = prompt('De-link ' + r.diaryId + ' from Bill ' + r.linkedEntryId + '? The Diary item returns to Pending (the bill itself is not changed).\n\nReason (kept on the trail):');
+  if (reason === null) return;
+  const res = await runAction(null, 'De-linking...', 'De-linked - the Diary number is Pending again.', () => gs('adminDelinkDiary', r.diaryId, reason, CURRENT_USER.username));
+  if (res && res.success){ loadAdminDiary(); refreshBadges(); }
+}
+async function adminDiaryLink(i){
+  const r = AD_ROWS[i];
+  const billId = prompt('Link ' + r.diaryId + ' to which Bill ID? (e.g. E1042)');
+  if (billId === null || !billId.trim()) return;
+  const reason = prompt('Reason for linking ' + r.diaryId + ' to ' + billId.trim() + ' (kept on the trail):');
+  if (reason === null) return;
+  const res = await runAction(null, 'Linking...', null, () => gs('adminLinkDiaryToBill', r.diaryId, billId.trim(), reason, CURRENT_USER.username));
+  if (res && res.success){
+    toast('Linked to Bill ' + billId.trim().toUpperCase() + '.', 'success');
+    if (res.warnings && res.warnings.length) alert('Linked, with a warning (not a block):\n- ' + res.warnings.join('\n- '));
+    loadAdminDiary(); refreshBadges();
+  }
+}
+
+/* =================================================================
+   REPORTS: Bill Cycle Report
+   ================================================================= */
+(function installBillCycleReport_(){
+  const nav = document.querySelector('#tab-reports nav.subtabs');
+  const panel = document.getElementById('tab-reports');
+  if (!nav || !panel || document.getElementById('sub-rep15')) return;
+  const btn = document.createElement('button');
+  btn.className = 'sub-btn'; btn.textContent = 'Bill Cycle Report';
+  btn.setAttribute('onclick', "showSubTab('rep15', event)");
+  nav.appendChild(btn);
+  const p = document.createElement('div');
+  p.id = 'sub-rep15'; p.className = 'subpanel';
+  p.innerHTML =
+    '<div class="card no-print"><h3>Bill Cycle Report</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">From the day a bill was received to its final disposal: every stage with dates in/out and days spent, and the action log showing who did what. ' +
+    'Enter a Bill ID (e.g. E1042) or a Diary Number (e.g. DN-2026-00017).</p>' +
+    '<div class="row"><div class="field"><label>Bill ID / Diary Number</label><input type="text" id="bc_id"></div>' +
+    '<div class="field" style="align-self:flex-end;"><button class="primary" id="btnBcGo" onclick="loadBillCycle()">Generate</button> ' +
+    '<button class="secondary" id="btnBcCsv" onclick="downloadBillCycleCSV()" style="display:none;">Download CSV</button> ' +
+    '<button class="secondary" id="btnBcPdf" onclick="downloadBillCyclePDF()" style="display:none;">Download PDF</button> ' +
+    '<button class="secondary" onclick="window.print()">Print</button></div></div></div>' +
+    '<div class="card"><div id="bc_result"></div></div>';
+  panel.appendChild(p);
+})();
+
+let BC_LAST = null;
+async function loadBillCycle(){
+  const id = document.getElementById('bc_id').value.trim();
+  if (!id){ toast('Enter a Bill ID or Diary Number.', 'error'); return; }
+  const res = await runAction(document.getElementById('btnBcGo'), 'Building report...', null, () => gs('getBillCycleReport', id, CURRENT_USER.username));
+  const wrap = document.getElementById('bc_result');
+  if (!res || res.success === false){
+    wrap.innerHTML = '<p class="error">' + escHtml_((res && res.message) || 'Could not build the report.') + '</p>';
+    document.getElementById('btnBcCsv').style.display = 'none'; document.getElementById('btnBcPdf').style.display = 'none';
+    BC_LAST = null; return;
+  }
+  BC_LAST = res;
+  const h = res.header, s = res.summary;
+  const kv = function(l, v){ return (v === '' || v === null || v === undefined) ? '' : '<div style="min-width:180px;"><span style="color:var(--text-muted);font-size:11.5px;">' + l + '</span><br><b>' + escHtml_(v) + '</b></div>'; };
+  let html = '<div style="text-align:center;font-weight:800;font-size:15px;">UNIVERSITY OF EDUCATION, LAHORE</div>' +
+    '<div style="text-align:center;margin-bottom:12px;">Bill Cycle Report - ' + escHtml_(h.billId) + '</div>' +
+    '<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;"><div class="row" style="gap:18px;">' +
+    kv('Payee / Beneficiary', h.payee) + kv('Description', h.description) + kv('Nature', h.nature) + kv('Campus', h.campus) + kv('Budget Head', h.head) + kv('Financial Year', h.fy) +
+    kv('Bill / Invoice No.', h.billNo) + kv('Gross Amount', h.gross ? num(h.gross) : '') + kv('Net Amount', h.net ? num(h.net) : '') + kv('IBFT Batch', h.batchId) + kv('Current Status', h.status) + '</div>' +
+    (h.note ? '<div style="margin-top:6px;color:var(--amber);font-size:12.5px;">' + escHtml_(h.note) + '</div>' : '') + '</div>' +
+    '<div style="border:1px solid var(--accent);border-radius:8px;padding:12px;margin-bottom:12px;"><div class="row" style="gap:18px;">' +
+    kv('Date Received', s.receivedDate) + kv('Final Disposal', s.finalStatus) + kv('Final Date', s.finalDate) + kv('Total Days', s.totalDays !== null ? String(s.totalDays) : '') +
+    kv('Days Returned / On Hold', String(s.holdDays) + (s.holdOpen ? ' (still on hold)' : '')) + kv('Current Stage', s.currentStage) + '</div></div>';
+  if (h.diaryNumbers && h.diaryNumbers.length){
+    html += '<h4 style="margin:10px 0 6px;">Diary Number(s)</h4><div class="table-wrap"><table><thead><tr><th>Diary No.</th><th>Date Received</th><th>Sender</th><th>Sender\'s Ref.</th><th>Originating Office</th><th>Assigned To</th></tr></thead><tbody>' +
+      h.diaryNumbers.map(function(d){ return '<tr><td>' + diaryIdLink(d.diaryId) + '</td><td>' + escHtml_(d.dateReceived) + '</td><td>' + escHtml_(d.sender) + '</td><td>' + escHtml_(d.senderRef) + '</td><td>' + escHtml_(d.office) + '</td><td>' + escHtml_(d.assignedTo) + '</td></tr>'; }).join('') + '</tbody></table></div>';
+  }
+  html += '<h4 style="margin:14px 0 6px;">Stages</h4><div class="table-wrap"><table id="bcStagesTable"><thead><tr><th>#</th><th>Stage</th><th>Action Taken By</th><th>Date In</th><th>Date Out</th><th class="num">Days at Stage</th><th>Status</th><th>Detail</th></tr></thead><tbody>' +
+    res.stages.map(function(g){ return '<tr><td>' + g.no + '</td><td>' + escHtml_(g.stage) + '</td><td style="white-space:normal;">' + escHtml_(g.actionBy) + '</td><td>' + escHtml_(g.dateIn) + '</td><td>' + escHtml_(g.dateOut) +
+      '</td><td class="num">' + (g.days !== null && g.days !== undefined ? g.days : '') + '</td><td>' + escHtml_(g.status) + '</td><td style="white-space:normal;">' + escHtml_(g.detail) + '</td></tr>'; }).join('') + '</tbody></table></div>' +
+    '<h4 style="margin:14px 0 6px;">Action Log</h4><div class="table-wrap"><table id="bcActionsTable"><thead><tr><th>#</th><th>Date &amp; Time</th><th>Action</th><th>Done By</th><th>Detail</th></tr></thead><tbody>' +
+    (res.actions.map(function(a){ return '<tr><td>' + a.no + '</td><td style="white-space:nowrap;">' + escHtml_(a.when) + '</td><td style="white-space:normal;">' + escHtml_(a.action) + '</td><td>' + escHtml_(a.by) + '</td><td style="white-space:normal;">' + escHtml_(a.detail) + '</td></tr>'; }).join('') || emptyRow(5)) + '</tbody></table></div>' +
+    '<div style="font-size:11.5px;color:var(--text-muted);margin-top:8px;">Days are calendar days between the dates shown (0 = same day). Generated ' + escHtml_(s.generatedAt) + ' by ' + escHtml_(CURRENT_USER.username) + '.</div>';
+  wrap.innerHTML = html;
+  document.getElementById('btnBcCsv').style.display = ''; document.getElementById('btnBcPdf').style.display = '';
+}
+function downloadBillCycleCSV(){
+  if (!BC_LAST){ toast('Generate the report first.', 'error'); return; }
+  const r = BC_LAST, h = r.header, s = r.summary;
+  const q = function(v){ return '"' + String(v === null || v === undefined ? '' : v).replace(/"/g, '""').replace(/\s+/g, ' ').trim() + '"'; };
+  const line = function(arr){ return arr.map(q).join(','); };
+  const L = [];
+  L.push(line(['UNIVERSITY OF EDUCATION, LAHORE'])); L.push(line(['BILL CYCLE REPORT', h.billId])); L.push('');
+  [['Payee / Beneficiary', h.payee], ['Description', h.description], ['Nature', h.nature], ['Campus', h.campus], ['Budget Head', h.head], ['Financial Year', h.fy],
+   ['Gross Amount', h.gross], ['Net Amount', h.net], ['IBFT Batch', h.batchId], ['Current Status', h.status], ['Date Received', s.receivedDate],
+   ['Final Disposal', s.finalStatus], ['Final Date', s.finalDate], ['Total Days', s.totalDays], ['Days Returned / On Hold', s.holdDays], ['Current Stage', s.currentStage],
+   ['Generated', s.generatedAt + ' by ' + CURRENT_USER.username]].forEach(function(p){ L.push(line(p)); });
+  L.push(''); L.push(line(['DIARY NUMBERS']));
+  L.push(line(['Diary No.', 'Date Received', 'Sender', "Sender's Ref.", 'Originating Office', 'Assigned To']));
+  (h.diaryNumbers || []).forEach(function(d){ L.push(line([d.diaryId, d.dateReceived, d.sender, d.senderRef, d.office, d.assignedTo])); });
+  L.push(''); L.push(line(['STAGES']));
+  L.push(line(['#', 'Stage', 'Action Taken By', 'Date In', 'Date Out', 'Days at Stage', 'Status', 'Detail']));
+  r.stages.forEach(function(g){ L.push(line([g.no, g.stage, g.actionBy, g.dateIn, g.dateOut, g.days, g.status, g.detail])); });
+  L.push(''); L.push(line(['ACTION LOG']));
+  L.push(line(['#', 'Date & Time', 'Action', 'Done By', 'Detail']));
+  r.actions.forEach(function(a){ L.push(line([a.no, a.when, a.action, a.by, a.detail])); });
+  const blob = new Blob(['\ufeff' + L.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'Bill_Cycle_' + String(h.billId).replace(/[^\w-]/g, '_') + '.csv';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+}
+function downloadBillCyclePDF(){
+  if (!BC_LAST){ toast('Generate the report first.', 'error'); return; }
+  const r = BC_LAST, h = r.header, s = r.summary;
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  const pw = doc.internal.pageSize.getWidth();
+  doc.setFont('times', 'bold'); doc.setFontSize(15);
+  doc.text('UNIVERSITY OF EDUCATION, LAHORE', pw / 2, 34, { align: 'center' });
+  doc.setFontSize(12); doc.text('BILL CYCLE REPORT', pw / 2, 52, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+  doc.text(h.billId, pw / 2, 66, { align: 'center' });
+  const pairs = [['Payee / Beneficiary', h.payee], ['Description', h.description], ['Nature', h.nature], ['Campus', h.campus], ['Budget Head', h.head], ['Financial Year', h.fy],
+    ['Gross Amount', h.gross ? num(h.gross) : ''], ['Net Amount', h.net ? num(h.net) : ''], ['IBFT Batch', h.batchId], ['Current Status', h.status],
+    ['Date Received', s.receivedDate], ['Final Disposal', s.finalStatus], ['Final Date', s.finalDate], ['Total Days', s.totalDays !== null ? String(s.totalDays) : ''],
+    ['Days Returned / On Hold', String(s.holdDays) + (s.holdOpen ? ' (still on hold)' : '')], ['Current Stage', s.currentStage]].filter(function(p){ return p[1] !== '' && p[1] !== null && p[1] !== undefined; });
+  const body = [];
+  for (let i = 0; i < pairs.length; i += 2) body.push([pairs[i][0], pairs[i][1], pairs[i + 1] ? pairs[i + 1][0] : '', pairs[i + 1] ? pairs[i + 1][1] : '']);
+  doc.autoTable({ body: body, startY: 76, theme: 'grid', styles: { fontSize: 8.5, cellPadding: 3 },
+    columnStyles: { 0: { fontStyle: 'bold', fillColor: [239, 241, 244], cellWidth: 110 }, 2: { fontStyle: 'bold', fillColor: [239, 241, 244], cellWidth: 110 } }, margin: { left: 30, right: 30 } });
+  let y = doc.lastAutoTable.finalY + 12;
+  if (h.diaryNumbers && h.diaryNumbers.length){
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Diary Number(s)', 30, y + 8);
+    doc.autoTable({ head: [['Diary No.', 'Date Received', 'Sender', "Sender's Ref.", 'Originating Office', 'Assigned To']],
+      body: h.diaryNumbers.map(function(d){ return [d.diaryId, d.dateReceived, d.sender, d.senderRef, d.office, d.assignedTo]; }),
+      startY: y + 14, styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [28, 61, 90], textColor: 255 }, margin: { left: 30, right: 30 } });
+    y = doc.lastAutoTable.finalY + 12;
+  }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Stages', 30, y + 8);
+  doc.autoTable({ head: [['#', 'Stage', 'Action Taken By', 'Date In', 'Date Out', 'Days', 'Status', 'Detail']],
+    body: r.stages.map(function(g){ return [g.no, g.stage, g.actionBy, g.dateIn, g.dateOut, g.days === null || g.days === undefined ? '' : g.days, g.status, g.detail]; }),
+    startY: y + 14, styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [28, 61, 90], textColor: 255 },
+    columnStyles: { 0: { cellWidth: 22 }, 5: { halign: 'right', cellWidth: 34 } }, margin: { left: 30, right: 30 } });
+  y = doc.lastAutoTable.finalY + 14;
+  if (y > doc.internal.pageSize.getHeight() - 90){ doc.addPage(); y = 40; }
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.text('Action Log', 30, y + 8);
+  doc.autoTable({ head: [['#', 'Date & Time', 'Action', 'Done By', 'Detail']],
+    body: r.actions.map(function(a){ return [a.no, a.when, a.action, a.by, a.detail]; }),
+    startY: y + 14, styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' }, headStyles: { fillColor: [28, 61, 90], textColor: 255 },
+    columnStyles: { 0: { cellWidth: 22 }, 1: { cellWidth: 80 } }, margin: { left: 30, right: 30 } });
+  const pages = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pages; i++){
+    doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(110);
+    const ph = doc.internal.pageSize.getHeight();
+    doc.text('Generated ' + s.generatedAt + ' by ' + CURRENT_USER.username + '. Days are calendar days between the dates shown (0 = same day).', 30, ph - 16);
+    doc.text('Page ' + i + ' of ' + pages, pw - 30, ph - 16, { align: 'right' });
+  }
+  doc.save('Bill_Cycle_' + String(h.billId).replace(/[^\w-]/g, '_') + '.pdf');
+}
+
+
+/* =================================================================
+   ADMIN > TAX SETTINGS: every Income Tax rate (Supply / Contract / Services) editable
+   ================================================================= */
+(function installIncomeTaxRatesEditor_(){
+  const btn = document.getElementById('btnSaveTaxSettings');
+  if (!btn || document.getElementById('itr_container')) return;
+  const box = document.createElement('div');
+  box.id = 'itr_box';
+  box.innerHTML =
+    '<h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Income Tax - Section 153 Rates (Supply, Contract, Services)</h4>' +
+    '<p style="font-size:11.5px;color:var(--text-muted);margin-top:-2px;">Rate of Gross Amount (%) withheld as Income Tax, for Active/Filer and Inactive/Non-Filer. Changes apply to bills saved from now on; bills already saved keep the figures they were saved with.</p>' +
+    '<div id="itr_container"><div style="color:var(--text-muted);font-size:12.5px;">Loading...</div></div>';
+  btn.parentNode.insertBefore(box, btn);
+})();
+const ITR_GROUP_LABELS = { Supply: 'Section 153(1)(a) - Supply / Sale of Goods', Contract: 'Section 153(1)(c) - Execution of Contracts', Service: 'Section 153(1)(b) - Rendering of Services' };
+function renderIncomeTaxRatesEditor_(rates){
+  const c = document.getElementById('itr_container');
+  if (!c || !rates) return;
+  const pct = v => (Number(v) * 100).toFixed(2);
+  let html = '';
+  Object.keys(rates).forEach(function(g){
+    html += '<div style="font-weight:700;margin:10px 0 4px;">' + escHtml_(ITR_GROUP_LABELS[g] || g) + '</div><div class="table-wrap"><table><thead><tr><th>Category / Taxpayer</th><th class="num">Active / Filer (%)</th><th class="num">Inactive / Non-Filer (%)</th></tr></thead><tbody>';
+    Object.keys(rates[g]).forEach(function(k){
+      const r = rates[g][k];
+      html += '<tr><td>' + escHtml_(k) + (r.final ? ' <span style="color:var(--amber);font-size:11px;">(Final Tax)</span>' : '') + '</td>' +
+        '<td class="num"><input type="number" step="0.01" min="0" max="100" class="itr-in" data-g="' + escHtml_(g) + '" data-k="' + escHtml_(k) + '" data-f="filer" value="' + pct(r.filer) + '" style="width:110px;text-align:right;"></td>' +
+        '<td class="num"><input type="number" step="0.01" min="0" max="100" class="itr-in" data-g="' + escHtml_(g) + '" data-k="' + escHtml_(k) + '" data-f="nonFiler" value="' + pct(r.nonFiler) + '" style="width:110px;text-align:right;"></td></tr>';
+    });
+    html += '</tbody></table></div>';
+  });
+  c.innerHTML = html;
+}
+function collectIncomeTaxRates_(){
+  const out = {};
+  document.querySelectorAll('#itr_container .itr-in').forEach(function(el){
+    const g = el.getAttribute('data-g'), k = el.getAttribute('data-k'), f = el.getAttribute('data-f');
+    (out[g] || (out[g] = {}))[k] = out[g][k] || {};
+    out[g][k][f] = (Number(el.value) || 0) / 100;
+  });
+  return out;
+}
+(function installIncomeTaxRatesHook_(){
+  const prev = window.gs;
+  window.gs = function(fnName){
+    const args = Array.prototype.slice.call(arguments, 1);
+    if (fnName === 'saveTaxSettings' && args[1] && typeof args[1] === 'object' && document.querySelector('#itr_container .itr-in')) {
+      args[1].incomeTaxRates = collectIncomeTaxRates_();
+    }
+    const p = prev.apply(this, [fnName].concat(args));
+    if (fnName === 'getTaxSettings') p.then(function(ts){ if (ts && ts.incomeTaxRates) renderIncomeTaxRatesEditor_(ts.incomeTaxRates); }).catch(function(){});
+    if (fnName === 'saveTaxSettings') p.then(function(res){ if (res && res.success) gs('getTaxSettings').catch(function(){}); }).catch(function(){});
+    return p;
+  };
+})();
+
+/* =================================================================
+   ADMIN: Move a bill to another cost centre / budget head
+   ================================================================= */
+(function installTransferCard_(){
+  const panel = document.getElementById('tab-admin');
+  if (!panel || document.getElementById('adm-transfer')) return;
+  const card = document.createElement('div');
+  card.className = 'card'; card.id = 'adm-transfer';
+  card.innerHTML =
+    '<h3>Move a Bill to Another Cost Centre / Budget Head</h3>' +
+    '<p style="font-size:12.5px;color:var(--text-muted);">For a bill booked to the wrong campus or budget head - even one already Paid - without cancelling and re-entering it. ' +
+    'The bill keeps its ID, status and payment; only its budget booking moves (the target must have an allocation for that head and enough balance). ' +
+    'The Budget Control Register keeps the trail: the original booking and a <b>reversal</b> row in the old cost centre, and the booking in the new one. ' +
+    'Works for single-head and bulk bills (a bulk bill moves as a whole); a bill split across several heads cannot be moved here.</p>' +
+    '<div class="row"><div class="field"><label>Bill ID</label><input type="text" id="tr_billid" placeholder="e.g. E1042"></div>' +
+    '<div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadBillForTransfer()">Load Bill</button></div></div>' +
+    '<div id="tr_info" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:13px;"></div>' +
+    '<div id="tr_form" style="display:none;">' +
+      '<div class="row"><div class="field"><label>Move To - Campus</label><select id="tr_campus" onchange="onTransferCampusChange()"></select></div>' +
+      '<div class="field"><label>Move To - Budget Head</label><select id="tr_head"><option value="">-- select campus first --</option></select></div></div>' +
+      '<div class="field"><label>Reason (kept on the record and shown in the Budget Control Register)</label><input type="text" id="tr_reason" placeholder="e.g. Booked to Main Campus by mistake - belongs to Lahore Campus"></div>' +
+      '<button class="secondary" id="btnTrPreview" onclick="previewTransfer()">Preview</button>' +
+      '<div id="tr_preview" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:8px;font-size:13px;"></div>' +
+      '<button class="primary" id="btnTrApply" onclick="applyTransfer()" style="display:none;margin-top:10px;">Confirm - Move This Bill</button>' +
+    '</div>';
+  panel.appendChild(card);
+  const grp = document.querySelector('#adminQuickNav optgroup[label="Bill Management"]');
+  if (grp){ const o = document.createElement('option'); o.value = 'adm-transfer'; o.textContent = 'Move a Bill to Another Cost Centre'; grp.appendChild(o); }
+})();
+
+let TR_BILL = null;
+async function loadBillForTransfer(){
+  const id = document.getElementById('tr_billid').value.trim();
+  if (!id){ toast('Enter a Bill ID.', 'error'); return; }
+  const res = await gs('getBillDetail', id).catch(function(e){ return { success:false, message:e.message }; });
+  const info = document.getElementById('tr_info');
+  document.getElementById('tr_preview').style.display = 'none';
+  document.getElementById('btnTrApply').style.display = 'none';
+  if (!res || res.success === false){ toast((res && res.message) || 'Bill not found.', 'error'); return; }
+  const b = res.bill;
+  info.style.display = 'block';
+  const multi = (res.headSplits && res.headSplits.length) || b.HeadCode === '(Multiple)';
+  const blocked = b.Status === 'Cancelled' ? 'This bill is cancelled - it is not booked to any budget.'
+    : (b.SplitFromEntryID ? 'This is an isolated beneficiary bill - move its parent bulk bill ' + b.SplitFromEntryID + ' instead.'
+    : (multi ? 'This bill is split across several budget heads and cannot be moved here.' : ''));
+  info.innerHTML = '<div style="display:flex;justify-content:space-between;"><span>Bill</span><b>' + escHtml_(b.EntryID) + ' - ' + escHtml_(b.PayeeType === 'Bulk' ? 'Bulk bill' : b.VendorName) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Status / FY</span><b>' + escHtml_(b.Status) + ' / ' + escHtml_(b.FY) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Gross Amount</span><b>' + num(b.Amount) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Currently booked to</span><b>' + escHtml_(b.CampusName) + ' / ' + escHtml_(b.HeadCode + ' - ' + b.HeadName) + '</b></div>' +
+    (blocked ? '<div style="color:var(--danger);margin-top:6px;">' + escHtml_(blocked) + '</div>' : '');
+  if (blocked){ document.getElementById('tr_form').style.display = 'none'; TR_BILL = null; return; }
+  TR_BILL = { id: b.EntryID, fy: b.FY };
+  fillSelect('tr_campus', CAMPUSES, 'CampusID', 'CampusName');
+  document.getElementById('tr_head').innerHTML = '<option value="">-- select campus first --</option>';
+  document.getElementById('tr_form').style.display = 'block';
+}
+async function onTransferCampusChange(){
+  const cid = document.getElementById('tr_campus').value;
+  if (!cid || !TR_BILL) return;
+  const list = await gs('getHeadsForCampus', cid, TR_BILL.fy).catch(function(){ return []; });
+  fillSelect('tr_head', (list || []).map(function(h){ return { HeadID: h.HeadID, L: h.HeadCode + ' - ' + h.HeadName }; }), 'HeadID', 'L');
+  document.getElementById('tr_preview').style.display = 'none';
+  document.getElementById('btnTrApply').style.display = 'none';
+}
+async function previewTransfer(){
+  if (!TR_BILL){ toast('Load a bill first.', 'error'); return; }
+  const cid = document.getElementById('tr_campus').value, hid = document.getElementById('tr_head').value;
+  if (!cid || !hid){ toast('Select the target campus and budget head.', 'error'); return; }
+  const res = await runAction(document.getElementById('btnTrPreview'), 'Checking...', null, () => gs('previewBillCostCenterTransfer', TR_BILL.id, cid, hid, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  const box = document.getElementById('tr_preview');
+  box.style.display = 'block';
+  box.innerHTML = '<div style="font-weight:700;color:var(--accent);margin-bottom:6px;">If confirmed (' + escHtml_(res.fy) + ', bill amount ' + num(res.amount) + '):</div>' +
+    '<div style="font-weight:700;">Leaves: ' + escHtml_(res.from.campus) + ' / ' + escHtml_(res.from.head) + '</div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Allocated</span><b>' + num(res.from.allocated) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Spent after this bill is removed</span><b>' + num(res.from.spentAfterRemoval) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Balance after removal</span><b>' + num(res.from.remainingAfterRemoval) + '</b></div>' +
+    '<div style="border-top:1px solid var(--border);margin:8px 0;"></div>' +
+    '<div style="font-weight:700;">Goes to: ' + escHtml_(res.to.campus) + ' / ' + escHtml_(res.to.head) + '</div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Allocated</span><b>' + num(res.to.allocated) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Spent before / after</span><b>' + num(res.to.spentBefore) + ' / ' + num(res.to.spentAfter) + '</b></div>' +
+    '<div style="display:flex;justify-content:space-between;"><span>Balance after</span><b style="color:' + (res.to.remainingAfter < 0 ? 'var(--danger)' : 'inherit') + ';">' + num(res.to.remainingAfter) + '</b></div>';
+  document.getElementById('btnTrApply').style.display = '';
+}
+async function applyTransfer(){
+  if (!TR_BILL) return;
+  const cid = document.getElementById('tr_campus').value, hid = document.getElementById('tr_head').value;
+  const reason = document.getElementById('tr_reason').value.trim();
+  if (!reason){ toast('Enter the reason for the move.', 'error'); return; }
+  if (!confirm('Move Bill ' + TR_BILL.id + ' to the selected cost centre / budget head? The Budget Control Register will show the reversal and the new booking. The bill itself and its payment are not changed.')) return;
+  const res = await runAction(document.getElementById('btnTrApply'), 'Moving...', null, () => gs('applyBillCostCenterTransfer', TR_BILL.id, cid, hid, reason, CURRENT_USER.username));
+  if (!res || res.success === false) return;
+  toast('Bill ' + res.entryId + ' moved.', 'success');
+  document.getElementById('tr_billid').value = ''; document.getElementById('tr_reason').value = '';
+  document.getElementById('tr_info').style.display = 'none'; document.getElementById('tr_form').style.display = 'none';
+  TR_BILL = null;
+}
+
+/* ---- Bill Audit View: show transfer history; Bulk upload: dropped-connection guidance + duplicate notice ---- */
+(function installTransferAndBulkHooks_(){
+  const prev = window.gs;
+  window.gs = function(fnName){
+    const p = prev.apply(this, arguments);
+    if (fnName === 'getBillDetail') p.then(function(res){
+      if (!res || res.success === false || !res.transfers || !res.transfers.length) return;
+      setTimeout(function(){
+        const modal = document.getElementById('billDetailModal'), box = document.getElementById('billDetailContent');
+        if (!modal || modal.style.display !== 'flex' || !box || document.getElementById('bav_transfers')) return;
+        if (!window.__lastBillAuditData || window.__lastBillAuditData.bill.EntryID !== res.bill.EntryID) return;
+        box.insertAdjacentHTML('beforeend', '<div class="bav-section" id="bav_transfers" style="margin-top:18px;background:rgba(245,158,11,0.10);border-color:rgba(245,158,11,0.35);">' +
+          '<div class="bav-section-title" style="color:var(--amber);">Cost Centre Transfers</div>' +
+          '<div class="table-wrap" style="margin-top:6px;"><table><thead><tr><th>Date</th><th>From</th><th>To</th><th>By</th><th>Reason</th></tr></thead><tbody>' +
+          res.transfers.map(function(t){ return '<tr><td>' + escHtml_(t.date) + '</td><td style="white-space:normal;">' + escHtml_(t.from) + '</td><td style="white-space:normal;">' + escHtml_(t.to) + '</td><td>' + escHtml_(t.by) + '</td><td style="white-space:normal;">' + escHtml_(t.reason) + '</td></tr>'; }).join('') +
+          '</tbody></table></div></div>');
+      }, 120);
+    }).catch(function(){});
+    if (fnName === 'submitBulkEntry') {
+      p.then(function(res){
+        if (res && res.duplicate) alert(res.message + '\n\nThis is the bill from your earlier attempt (it was saved before the connection dropped or the button was pressed twice). Nothing was duplicated.');
+        else if (res && res.payeeWarning) alert(res.payeeWarning);
+      }).catch(function(){
+        alert('The connection or the server stopped before confirming your bulk upload.\n\nDo NOT worry about duplicates or partial data: a bulk bill is saved completely or not at all.\nJust click Submit Bulk Bill again with the same file. If the first attempt did save, you will be told its Bill ID and nothing is saved twice; if it did not, it saves now.');
+      });
+    }
+    return p;
+  };
+})();
+</script>

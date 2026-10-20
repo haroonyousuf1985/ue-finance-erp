@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<?!= include('Styles'); ?>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+<div id="toastWrap"></div>
+
+<!-- LOGIN -->
+<div id="loginScreen">
+  <h2>ERP & Budget Utilization Module - UE Finance</h2>
+  <div class="field"><label>Username</label><input id="loginUser" type="text" autocomplete="username"></div>
+  <div class="field"><label>Password</label><input id="loginPass" type="password" autocomplete="current-password"></div>
+  <button class="primary" onclick="doLogin()" style="width:100%;">Login</button>
+  <div id="loginMsg" class="error"></div>
+</div>
+
+<!-- APP -->
+<div id="appScreen">
+  <header>
+    <h1>ERP & Budget Utilization Module - UE Finance</h1>
+    <div class="user-info">
+      <span id="whoami"></span>
+      <button class="theme-toggle-btn" id="themeToggleBtn" onclick="toggleTheme()" title="Switch between dark and light mode">☀️ Light</button>
+      <button onclick="showPasswordChange()">Password</button>
+      <button onclick="logout()">Logout</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab-btn" data-tab="diary" onclick="showTab('diary', event)">0. Diary<span class="badge" id="badge-diary" style="display:none;"></span></button>
+    <button class="tab-btn active" data-tab="entry" onclick="showTab('entry', event)">1. New Entry</button>
+    <button class="tab-btn" data-tab="processing" onclick="showTab('processing', event)">2. Processing<span class="badge" id="badge-processing" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="passing" onclick="showTab('passing', event)">3. Passing<span class="badge" id="badge-passing" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="payment" onclick="showTab('payment', event)">4. Payment/IBFT<span class="badge" id="badge-payment" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="paymentconfirm" onclick="showTab('paymentconfirm', event)">5. Confirmation<span class="badge" id="badge-paymentconfirm" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="reconciliation" onclick="showTab('reconciliation', event)">6. Reconciliation<span class="badge" id="badge-reconciliation" style="display:none;"></span></button>
+    <button class="tab-btn" data-tab="reports" onclick="showTab('reports', event)">Reports</button>
+    <button class="tab-btn" data-tab="admin" onclick="showTab('admin', event)">Admin</button>
+  </nav>
+
+  <?!= include('Diary'); ?>
+  <?!= include('Entry'); ?>
+  <?!= include('Processing'); ?>
+  <?!= include('Passing'); ?>
+  <?!= include('Payment'); ?>
+  <?!= include('PaymentConfirmation'); ?>
+  <?!= include('Reconciliation'); ?>
+  <?!= include('ReportsView'); ?>
+  <?!= include('Admin'); ?>
+</div>
+
+<div id="pwModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:100;">
+  <div class="card" style="background:var(--navy-light); max-width:340px; width:90%; margin:0;">
+    <h3>Change Password</h3>
+    <div class="field"><label>Old Password</label><input type="password" id="pw_old"></div>
+    <div class="field"><label>New Password</label><input type="password" id="pw_new"></div>
+    <button class="primary" id="btnPwChange" onclick="submitPasswordChange()">Update</button>
+    <button class="secondary" onclick="document.getElementById('pwModal').style.display='none'">Cancel</button>
+  </div>
+</div>
+
+<div id="billDetailModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:100; padding:16px;">
+  <div class="card" style="background:var(--navy-light); max-width:680px; width:100%; margin:0; max-height:90vh; overflow-y:auto;">
+    <div class="no-print" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <h3 style="margin:0;">Bill Audit View</h3>
+      <div style="display:flex; gap:8px;">
+        <button class="secondary" onclick="downloadBillAuditPDF()">Save as PDF</button>
+        <button class="secondary" onclick="printBillAudit()">Print</button>
+        <button class="secondary" onclick="document.getElementById('billDetailModal').style.display='none'">Close</button>
+      </div>
+    </div>
+    <div id="billDetailContent">Loading...</div>
+  </div>
+</div>
+
+<div id="confirmModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:110; padding:16px;">
+  <div class="card" style="background:var(--navy-light); max-width:560px; width:100%; margin:0; max-height:90vh; overflow-y:auto;">
+    <h3 style="margin-top:0;">Bill Saved - Please Confirm</h3>
+    <div id="confirmContent" style="font-size:19px; line-height:1.9;"></div>
+    <p style="font-size:13px;color:var(--text-muted);margin-top:14px;">Check the figures above against your paper record. Validate if correct, or Update to change anything on this same bill.</p>
+    <div style="display:flex; gap:10px; margin-top:10px;">
+      <button class="primary" style="flex:1; font-size:16px; padding:14px;" onclick="validateConfirmedEntry()">Validate</button>
+      <button class="secondary" style="flex:1; font-size:16px; padding:14px;" onclick="updateConfirmedEntry()">Update</button>
+    </div>
+  </div>
+</div>
+
+<!-- Diary Trail popup: lives here (not inside the Diary tab) so it opens in the same window on ANY tab, e.g. from Reports > Diary Report. -->
+<div id="diaryTrailModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:105; padding:16px;">
+  <div class="card" style="background:var(--navy-light); max-width:900px; width:100%; margin:0; max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+      <h3 style="margin:0;">Diary Trail</h3>
+      <button class="secondary" onclick="document.getElementById('diaryTrailModal').style.display='none'">Close</button>
+    </div>
+    <div id="diaryTrailContent">Loading...</div>
+  </div>
+</div>
+
+<?!= include('Scripts'); ?>
+<?!= include('ScriptsDiary'); ?>
+</body>
+</html>

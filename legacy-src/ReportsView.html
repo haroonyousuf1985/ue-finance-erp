@@ -1,0 +1,442 @@
+<!-- REPORTS -->
+<div id="tab-reports" class="tabpanel">
+  <nav class="subtabs no-print">
+    <button class="sub-btn active" onclick="showSubTab('rep1', event)">Yearly Budget Matrix</button>
+    <button class="sub-btn" onclick="showSubTab('rep2', event)">Budget Consumption</button>
+    <button class="sub-btn" onclick="showSubTab('rep3', event)">Bill Status</button>
+    <button class="sub-btn" onclick="showSubTab('rep4', event)">Budget Control Register</button>
+    <button class="sub-btn" onclick="showSubTab('rep5', event)">General Ledger</button>
+    <button class="sub-btn" onclick="showSubTab('rep6', event)">IBFT Payment</button>
+    <button class="sub-btn" onclick="showSubTab('rep7', event)">Sanction Proforma</button>
+    <button class="sub-btn" onclick="showSubTab('rep8', event)">AI Report</button>
+    <button class="sub-btn" onclick="showSubTab('rep9', event)">Tax Deduction Statement</button>
+    <button class="sub-btn" onclick="showSubTab('rep10', event)">Diary Report</button>
+    <button class="sub-btn" onclick="showSubTab('rep11', event)">Confirmed Payments</button>
+    <button class="sub-btn" onclick="showSubTab('rep12', event)">Tax Calculation Details</button>
+  </nav>
+
+  <div id="sub-rep1" class="subpanel active">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row"><div class="field" style="max-width:220px;"><label>Financial Year</label><select id="r1_fy"></select></div></div>
+      <label>Cost Centres <label style="display:inline;font-weight:normal;"><input type="checkbox" id="r1_selectall" checked onclick="toggleAll('r1_campuses', this.checked)" style="width:auto;"> Select All</label></label>
+      <div class="checklist" id="r1_campuses"></div>
+      <div style="margin-top:10px;">
+        <button class="primary" id="btnR1" onclick="loadYearlyReport()">Load Report</button>
+        <button class="secondary" onclick="exportTableToCSV('yearlyTable','Yearly_Budget_Matrix.csv')">Download CSV</button>
+        <button class="secondary" onclick="downloadTablePDF('yearlyTable','Yearly_Budget_Matrix.pdf','Yearly Budget Matrix', REPORT_CAPTIONS.r1)">Download PDF</button>
+        <button class="secondary" onclick="window.print()">Print</button>
+      </div>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="r1_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="yearlyTable"><thead><tr id="yearlyHeadRow"></tr></thead><tbody></tbody><tfoot><tr id="yearlyFootRow"></tr></tfoot></table>
+    </div>
+  </div>
+
+  <!-- One row per Budget Head with Allocated / Spent / Consumed % / Balance.
+       One campus + "All Heads" -> a row per head for that campus.
+       One campus + one Head -> exactly one row.
+       "All Campuses" -> each row is the CONSOLIDATED total for that head across every campus. -->
+  <div id="sub-rep2" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row">
+        <div class="field"><label>Financial Year</label><select id="r2_fy"></select></div>
+        <div class="field"><label>Campus</label><select id="r2_campus"><option value="">All Campuses</option></select></div>
+        <div class="field"><label>Budget Head</label><select id="r2_head"><option value="">All Budget Heads</option></select></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>From Date (optional)</label><input type="date" id="r2_from"></div>
+        <div class="field"><label>To Date (optional)</label><input type="date" id="r2_to"></div>
+        <div class="field"><label>Vendor contains (optional)</label><input type="text" id="r2_vendor"></div>
+      </div>
+      <button class="primary" id="btnR2" onclick="loadConsumptionReport()">Load Report</button>
+      <button class="secondary" onclick="exportTableToCSV('consumptionSummaryTable','Budget_Consumption_Summary.csv')">Download Summary CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('consumptionSummaryTable','Budget_Consumption_Summary.pdf','Budget Consumption - Summary', REPORT_CAPTIONS.r2)">Download Summary PDF</button>
+      <button class="secondary" onclick="exportTableToCSV('consumptionDetailTable','Budget_Consumption_Detail.csv')">Download Detail CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('consumptionDetailTable','Budget_Consumption_Detail.pdf','Budget Consumption - Detail', REPORT_CAPTIONS.r2)">Download Detail PDF</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card">
+      <h3 id="r2_scopeLabel" style="color:var(--text-muted); font-size:14px;"></h3>
+      <div class="balance-box">
+        <div class="bal-allocated"><span class="label">Total Allocated</span><span class="val" id="r2_alloc">-</span></div>
+        <div class="bal-spent"><span class="label">Total Consumed</span><span class="val" id="r2_spent">-</span></div>
+        <div class="bal-remaining"><span class="label">Total Balance</span><span class="val" id="r2_remain">-</span></div>
+      </div>
+      <div class="table-wrap" style="margin-top:14px;">
+        <table id="consumptionSummaryTable">
+          <thead><tr><th>Budget Code</th><th>Budget Head</th><th class="num">Allocated</th><th class="num">Spent</th><th class="num">Consumed %</th><th></th><th class="num">Balance</th></tr></thead>
+          <tbody></tbody>
+          <tfoot><tr id="consumptionFootRow"></tr></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Bill-level Detail</h3>
+      <div class="table-wrap">
+        <table id="consumptionDetailTable">
+          <thead><tr><th>Date</th><th>Campus</th><th>Code</th><th>Head</th><th>Vendor</th><th>Bill No.</th><th class="num">Amount</th><th>Status</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="sub-rep3" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row">
+        <div class="field"><label>Financial Year</label><select id="r3_fy"></select></div>
+        <div class="field"><label>Status</label>
+          <select id="r3_status"><option value="">All</option><option>Received</option><option>Processed</option><option>Passed</option><option>Paid</option><option>Cancelled</option></select>
+        </div>
+        <div class="field"><label>Campus</label><select id="r3_campus"><option value="">All Campuses</option></select></div>
+        <div class="field"><label>From Date</label><input type="date" id="r3_from"></div>
+        <div class="field"><label>To Date</label><input type="date" id="r3_to"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Vendor contains</label><input type="text" id="r3_vendor"></div>
+        <div class="field"><label>Employee ID</label><input type="text" id="r3_employeeid"></div>
+        <div class="field"><label>Amount contains</label><input type="text" id="r3_amount"></div>
+        <div class="field"><label>Description contains</label><input type="text" id="r3_description"></div>
+        <div class="field"><label>IBAN contains</label><input type="text" id="r3_iban"></div>
+      </div>
+      <button class="primary" id="btnR3" onclick="loadStatusReport()">Load Report</button>
+      <button class="secondary" onclick="exportTableToCSV('statusTable','Bill_Status_Report.csv')">Download CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('statusTable','Bill_Status_Report.pdf','Bill Status Report', REPORT_CAPTIONS.r3)">Download PDF</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card no-print">
+      <div class="row"><div class="field"><label>Search (loaded results)</label><input type="text" id="r3_search" oninput="liveFilterTable('statusTable', this.value)" placeholder="Type to filter rows already loaded above"></div></div>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="r3_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="statusTable">
+        <thead><tr>
+          <th>Bill ID</th><th>Bill No.</th><th>Entry Date</th><th>FY</th><th>Campus</th><th>Budget Code</th><th>Budget Head</th>
+          <th>Payee Type</th><th>Employee ID</th><th>Vendor/Payee</th><th>CNIC/NTN</th><th>IBAN</th>
+          <th>Description</th><th>Nature of Bill</th><th>FBR Section</th><th class="num">Gross Amount</th>
+          <th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Security</th><th class="num">Penalty</th><th class="num">Other Deductions</th><th class="num">Net Amount</th>
+          <th>Entered By</th><th>Status</th>
+          <th>Received Date</th><th>Processed By</th><th>Processed Date</th><th>Passed By</th><th>Passed Date</th><th>Paid By</th><th>Paid Date</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Budget Control Register: bill-level ledger grouped by Campus > Budget Head. -->
+  <div id="sub-rep4" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row">
+        <div class="field"><label>Financial Year</label><select id="r4_fy"></select></div>
+        <div class="field"><label>Campus</label><select id="r4_campus"><option value="">All Campuses</option></select></div>
+        <div class="field"><label>Budget Head</label><select id="r4_head"><option value="">All Budget Heads</option></select></div>
+      </div>
+      <button class="primary" id="btnR4" onclick="loadBudgetControlRegister()">Load Register</button>
+      <button class="secondary" onclick="exportTableToCSV('bcrTable','Budget_Control_Register.csv')">Download CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('bcrTable','Budget_Control_Register.pdf','Budget Control Register', REPORT_CAPTIONS.r4)">Download PDF</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="r4_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="bcrTable">
+        <thead><tr><th>Campus</th><th>Budget Head</th><th>Bill ID</th><th>Date</th><th>Description</th>
+          <th class="num">Allocation</th><th class="num">Bill Amount</th><th class="num">Already Consumed</th><th class="num">New Total</th><th class="num">Remaining Balance</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- General Ledger: one account per vendor. -->
+  <div id="sub-rep5" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">Vendors and Employees only - Students don't get a General Ledger account.</p>
+      <div class="row">
+        <div class="field"><label>Financial Year</label><select id="r5_fy"></select></div>
+        <div class="field"><label>Vendor/Employee contains</label><input type="text" id="r5_vendor"></div>
+        <div class="field"><label>CNIC/NTN contains</label><input type="text" id="r5_cnic"></div>
+        <div class="field"><label>IBAN contains</label><input type="text" id="r5_iban"></div>
+        <div class="field"><label>Employee ID contains</label><input type="text" id="r5_employeeid"></div>
+      </div>
+      <button class="primary" id="btnR5" onclick="loadGeneralLedger()">Load Ledger</button>
+      <button class="secondary" onclick="exportTableToCSV('glTable','General_Ledger.csv')">Download CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('glTable','General_Ledger.pdf','General Ledger - Summary', REPORT_CAPTIONS.r5)">Download PDF</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="r5_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="glTable">
+        <thead><tr><th>Vendor/Employee</th><th>Employee ID</th><th>IBAN</th><th>CNIC/NTN</th><th class="num">Bills Paid</th><th class="num">Gross Disbursed</th>
+          <th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Penalty</th><th class="num">Security Deducted</th>
+          <th class="num">Other Deductions</th><th class="num">Net Paid</th><th class="num">Security Balance (all years)</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h3>Bill-level Detail
+        <button class="secondary no-print" onclick="exportTableToCSV('glDetailTable','General_Ledger_Detail.csv')">Download CSV</button>
+        <button class="secondary no-print" onclick="downloadTablePDF('glDetailTable','General_Ledger_Detail.pdf','General Ledger - Bill Detail', REPORT_CAPTIONS.r5)">Download PDF</button>
+      </h3>
+      <div class="table-wrap">
+        <table id="glDetailTable">
+          <thead><tr><th>Vendor</th><th>Bill ID</th><th>Date</th><th>Campus</th><th>Budget Head</th><th>Status</th><th>Bill No.</th><th>Description</th><th>Nature</th>
+            <th class="num">Gross</th><th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Penalty</th><th class="num">Security</th><th class="num">Other</th><th class="num">Net</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- IBFT Payment: every bill actually paid out, same columns as the Stage 4 IBFT export. -->
+  <div id="sub-rep6" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row">
+        <div class="field"><label>Payment Date From</label><input type="date" id="r6_from"></div>
+        <div class="field"><label>Payment Date To</label><input type="date" id="r6_to"></div>
+      </div>
+      <button class="primary" id="btnR6" onclick="loadIBFTPaymentReport()">Load Report</button>
+      <button class="secondary" onclick="exportArrayToCSV(window.__lastIbftPaymentItems, IBFT_COLUMNS, 'IBFT_Payment_Report.csv')">Download CSV</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card">
+      <h3 style="color:var(--text-muted); font-size:14px;">
+        <span id="r6_countLabel"></span>
+        &nbsp; Total Net Payment: <span id="r6_totalNet">-</span>
+      </h3>
+      <div class="no-print" id="r6_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:8px;"></div>
+      <div class="row no-print">
+        <div class="field"><label>Search (all loaded fields - name, CNIC, IBAN, Bill ID, description, ...)</label>
+          <input type="text" id="r6_search" oninput="filterIBFTPaymentReport()" placeholder="Type to filter the rows already loaded above"></div>
+      </div>
+      <div id="r6_tableWrap"></div>
+    </div>
+  </div>
+
+  <!-- Sanction Proforma: pick bills -> pick columns -> letter built fresh from what is on record. -->
+  <div id="sub-rep7" class="subpanel">
+    <div class="card no-print">
+      <h3>Step 1 - Find &amp; Select Bills</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">A bulk bill is selected here as a single bill - it will automatically expand into its individual beneficiaries in the letter's table. A beneficiary that was separated into its own bill (e.g. E123-A) must be selected separately.</p>
+      <div class="row">
+        <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="sp_fy"></select></div>
+        <div class="field"><label>Status</label><select id="sp_status"><option value="">All</option><option>Received</option><option>Processed</option><option>Passed</option><option>Paid</option></select></div>
+        <div class="field"><label>Campus</label><select id="sp_campus"><option value="">All Campuses</option></select></div>
+        <div class="field"><label>Bill ID contains</label><input type="text" id="sp_billid"></div>
+        <div class="field"><label>Vendor/Payee contains</label><input type="text" id="sp_vendor"></div>
+        <div class="field"><label>Description contains</label><input type="text" id="sp_description"></div>
+      </div>
+      <button class="primary" id="btnSpLoad" onclick="loadSanctionPicker()">Load Bills</button>
+      <span id="sp_selectedCount" style="font-size:12.5px;color:var(--text-muted); margin-left:10px;"></span>
+      <div class="table-wrap" style="margin-top:10px;max-height:320px;overflow-y:auto;">
+        <table id="sanctionPickerTable">
+          <thead><tr><th></th><th>Bill ID</th><th>Date</th><th>Campus</th><th>Head</th><th>Payee</th><th>Description</th><th>Nature</th><th class="num">Amount</th><th>Status</th></tr></thead>
+          <tbody><tr><td colspan="10" style="text-align:center;color:var(--text-muted);">Set filters above and click Load Bills.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card no-print">
+      <h3>Step 2 - Letter Detail &amp; Table Columns</h3>
+      <div class="row">
+        <div class="field"><label>Sanction No.</label><input type="text" id="sp_sanctionNo" placeholder="e.g. 123/UE/2026"></div>
+        <div class="field"><label>Dated</label><input type="date" id="sp_dated"></div>
+      </div>
+      <label>Table Columns <label style="display:inline;font-weight:normal;"><input type="checkbox" id="sp_selectAllCols" checked onclick="toggleAll('sp_columns', this.checked)" style="width:auto;"> Select All</label></label>
+      <div class="checklist" id="sp_columns"></div>
+      <button class="primary" id="btnSpGenerate" onclick="generateSanctionProforma()" style="margin-top:12px;">Generate Sanction Proforma</button>
+    </div>
+
+    <div class="card" id="sp_previewCard" style="display:none;">
+      <h3 class="no-print">Preview
+        <button class="secondary" onclick="downloadSanctionPDF()">Download PDF</button>
+        <button class="secondary" onclick="downloadSanctionDoc()">Download Word (.doc)</button>
+        <button class="secondary" onclick="window.print()">Print</button>
+      </h3>
+      <div id="sp_previewWrap"></div>
+    </div>
+  </div>
+
+  <!-- AI Report: answers a plain-English question about the bill database using Google Gemini. -->
+  <div id="sub-rep8" class="subpanel">
+    <div class="card no-print" id="ai_keyCard">
+      <h3>Gemini API Key</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Your own Google Gemini API key, used only by this Google Sheet to answer questions below - it's stored in this
+        script's own Properties (not in any sheet or shared with anyone else) and never sent back to your browser once saved.
+        Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+      </p>
+      <div id="ai_keyStatus" style="font-size:13px;margin-bottom:10px;"></div>
+      <div class="row" id="ai_keyFormRow">
+        <div class="field"><label>Gemini API Key</label><input type="password" id="ai_apiKey" autocomplete="off" placeholder="Paste your key here"></div>
+        <div class="field" style="max-width:220px;"><label>Model (optional)</label><input type="text" id="ai_model" placeholder="gemini-2.0-flash"></div>
+        <div class="field" style="align-self:flex-end;">
+          <button class="primary" id="btnSaveGeminiKey" onclick="saveGeminiKeyForm()">Save Key</button>
+          <button class="secondary" onclick="clearGeminiKeyForm()">Clear Key</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card no-print">
+      <h3>Ask a Question</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Examples: "Compare electricity bill totals across all campuses this year." &middot; "What's the status of bill E1023?"
+        &middot; "List every bill for vendor ABC Traders." &middot; "Total income tax deducted each month, by section."
+        The AI only reports what's actually in the database below - no opinions, no suggestions, no outside knowledge.
+        The answer always appears right here in the browser - if it includes a table, a "Download this table as CSV"
+        button appears under it, but nothing ever downloads unless you click that button yourself.
+      </p>
+      <div class="row">
+        <div class="field" style="max-width:220px;"><label>Financial Year (recommended, keeps it fast)</label><select id="ai_fy"></select></div>
+      </div>
+      <div class="field"><label>Your Question</label><textarea id="ai_question" rows="3" style="resize:vertical;"></textarea></div>
+      <button class="primary" id="btnAskAI" onclick="askAIReportForm()">Ask</button>
+      <span id="ai_rowInfo" style="font-size:12px;color:var(--text-muted);margin-left:10px;"></span>
+    </div>
+
+    <div class="card" id="ai_answerCard" style="display:none;">
+      <h3 class="no-print">Answer <button class="secondary" onclick="window.print()">Print</button></h3>
+      <div id="ai_answerWrap" style="line-height:1.7;"></div>
+    </div>
+  </div>
+
+  <!-- Tax Deduction Statement (also available at Admin > Section 149). -->
+  <div id="sub-rep9" class="subpanel">
+    <div class="card no-print">
+      <h3>Tax Deduction Statement</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        A complete, auditable justification of every rupee of Income Tax on record for one UE/Non-UE Employee in one FY -
+        every transaction, chronologically, with the FBR section applied, and for a Section 149 slab transaction, exactly
+        which bracket(s) its amount fell into and the rate applied to each portion. Any credit applied, and the running
+        annual income before/after each transaction, are shown too - downloadable as CSV or PDF.
+      </p>
+      <div class="row">
+        <div class="field" style="max-width:200px;">
+          <label>Payee Type</label>
+          <select id="rtds_payeeType" onchange="onTdsPayeeTypeChange('reports')">
+            <option value="Employee">UE Employee</option>
+            <option value="NonUEEmployee">Non-UE Employee</option>
+          </select>
+        </div>
+        <div class="field"><label id="rtds_keyLabel">Employee ID</label><input type="text" id="rtds_key"></div>
+        <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="rtds_fy"></select></div>
+        <div class="field" style="align-self:flex-end;">
+          <button class="primary" onclick="generateTaxDeductionStatement('reports')">Generate</button>
+          <button class="secondary" id="btnRtdsCsv" onclick="downloadTdsCSV('reports')" style="display:none;">Download CSV</button>
+          <button class="secondary" id="btnRtdsPdf" onclick="downloadTdsPDF('reports')" style="display:none;">Download PDF</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div id="rtdsResult"></div>
+    </div>
+  </div>
+
+  <!-- Diary Report: one row per Diary item (Bill or Letter) with turnaround time. -->
+  <div id="sub-rep10" class="subpanel">
+    <div class="card no-print">
+      <h3>Filters</h3>
+      <div class="row">
+        <div class="field"><label>User</label><select id="dr_user"><option value="">All Users</option></select></div>
+        <div class="field"><label>Originating Office</label><select id="dr_office"><option value="">All Offices</option></select></div>
+        <div class="field"><label>Beneficiary/Vendor/Employee Name or ID</label><input type="text" id="dr_query"></div>
+        <div class="field" style="align-self:flex-end;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="checkbox" id="dr_includeCompleted" checked style="width:auto;"> Include Completed</label>
+        </div>
+      </div>
+      <button class="primary" id="btnDiaryReport" onclick="loadDiaryReport()">Load Report</button>
+      <button class="secondary" onclick="exportTableToCSV('diaryReportTable','Diary_Report.csv')">Download CSV</button>
+      <button class="secondary" onclick="downloadTablePDF('diaryReportTable','Diary_Report.pdf','Diary Report', REPORT_CAPTIONS.dr)">Download PDF</button>
+      <button class="secondary" onclick="window.print()">Print</button>
+    </div>
+    <div class="card">
+      <h3 style="font-size:14px;color:var(--text-muted);">Turnaround - Number of Bills/Letters by Days in Queue (or Days to Complete)</h3>
+      <div id="diaryReportChart"></div>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="dr_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="diaryReportTable">
+        <thead><tr><th>Diary Number</th><th>Date</th><th>Type</th><th>Originating Office</th><th>Assigned To</th><th>Current Status</th><th class="num">Days in Queue / Total Days</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Confirmed Payments - only money ACTUALLY confirmed received. A bulk bill's beneficiaries
+       appear individually, only once their OWN line is Confirmed, each with its own FBR Section. -->
+  <div id="sub-rep11" class="subpanel">
+    <div class="card no-print">
+      <h3>Confirmed Payments</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">Set your filters, then click Load - this does not fetch automatically, to stay fast as the number of confirmed payments grows into the thousands.</p>
+      <div class="row">
+        <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="cp_fy"></select></div>
+        <div class="field"><label>Campus</label><select id="cp_campus"><option value="">All Campuses</option></select></div>
+        <div class="field"><label>Bill ID contains</label><input type="text" id="cp_billid"></div>
+        <div class="field"><label>Employee ID contains</label><input type="text" id="cp_employeeid"></div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Vendor/Employee/Name contains</label><input type="text" id="cp_vendor"></div>
+        <div class="field"><label>Description contains</label><input type="text" id="cp_desc"></div>
+        <div class="field"><label>Min Amount</label><input type="number" id="cp_min"></div>
+        <div class="field"><label>Max Amount</label><input type="number" id="cp_max"></div>
+      </div>
+      <div class="row">
+        <div class="field" style="align-self:flex-end;">
+          <button class="primary" id="btnLoadConfirmedPayments" onclick="loadConfirmedPayments()">Load</button>
+          <button class="secondary" onclick="exportTableToCSV('confirmedPaymentsTable','Confirmed_Payments.csv')">Download CSV</button>
+          <button class="secondary" onclick="downloadTablePDF('confirmedPaymentsTable','Confirmed_Payments.pdf','Confirmed Payments', REPORT_CAPTIONS.cp)">Download PDF</button>
+          <button class="secondary" onclick="window.print()">Print</button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field"><label>Search (loaded results)</label><input type="text" id="cp_search" oninput="liveFilterTable('confirmedPaymentsTable', this.value)" placeholder="Type to filter rows already loaded above"></div>
+      </div>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="cp_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="confirmedPaymentsTable">
+        <thead><tr><th>Bill / Line ID</th><th>Campus</th><th>Employee ID</th><th>Beneficiary</th><th>IBAN</th><th>Bill Description</th><th>FBR Section</th><th class="num">Gross Amount</th>
+          <th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Security</th><th class="num">Penalty</th><th class="num">Other Deductions</th>
+          <th class="num">Net</th><th>Confirmed Date</th><th>Status</th></tr></thead>
+        <tbody><tr><td colspan="17" style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Tax Calculation Details: load ONE bill (or one beneficiary line, e.g. E345-2). -->
+  <div id="sub-rep12" class="subpanel">
+    <div class="card no-print">
+      <h3>Tax Calculation Details</h3>
+      <p style="font-size:12.5px;color:var(--text-muted);">
+        Enter a Bill ID for a single-payee bill, a bulk bill's own ID (shows every beneficiary, one row each, each with its
+        own FBR Section), or one specific beneficiary's own line ID (e.g. E345-2) for just that person.
+      </p>
+      <div class="row">
+        <div class="field"><label>Bill ID / Line ID</label><input type="text" id="tcd_billid" placeholder="e.g. E1042 or E1042-3"></div>
+        <div class="field" style="align-self:flex-end;">
+          <button class="primary" id="btnTcdLoad" onclick="loadTaxCalculationDetails()">Load</button>
+          <button class="secondary" onclick="document.getElementById('tcd_colPicker').style.display = document.getElementById('tcd_colPicker').style.display==='none'?'block':'none';">Column Visibility</button>
+          <button class="secondary" onclick="exportTableToCSV('tcdTable','Tax_Calculation_Details.csv')">Download CSV</button>
+          <button class="secondary" onclick="downloadTablePDF('tcdTable','Tax_Calculation_Details.pdf','Tax Calculation Details', REPORT_CAPTIONS.tcd)">Download PDF</button>
+        </div>
+      </div>
+      <div id="tcd_colPicker" style="display:none;margin-top:10px;">
+        <label>Columns <label style="display:inline;font-weight:normal;"><input type="checkbox" id="tcd_selectAllCols" onclick="toggleAll('tcd_columns', this.checked)" style="width:auto;"> Select All</label></label>
+        <div class="checklist" id="tcd_columns"></div>
+      </div>
+    </div>
+    <div class="card table-wrap">
+      <div class="no-print" id="tcd_caption" style="font-size:12.5px;color:var(--text-muted);margin-bottom:10px;"></div>
+      <table id="tcdTable">
+        <thead><tr id="tcdHeadRow"></tr></thead>
+        <tbody><tr><td style="text-align:center;color:var(--text-muted);">Enter a Bill ID above and click Load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+</div>

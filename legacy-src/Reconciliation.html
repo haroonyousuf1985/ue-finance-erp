@@ -1,0 +1,67 @@
+<!-- RECONCILIATION - Admin and IBFT only. Everything that needs a human to fix after a payment
+     bounced. A failed bulk beneficiary arrives here as its OWN bill (E123-A ...), linked to the
+     original bulk bill; fix its bank detail and Resubmit - only that bill goes back through
+     IBFT/Payment. Every action is trail-logged and visible in the Bill Audit View / Diary Trail. -->
+<div id="tab-reconciliation" class="tabpanel">
+  <div class="card">
+    <h3>Needs Correction <span class="pill Cancelled">Payment Failed</span></h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Bills whose transfer bounced - including beneficiaries separated out of a bulk bill (shown as E123-A, E123-B ...
+      with "Isolated From" naming the original bulk bill). Edit the beneficiary's IBAN/Name/CNIC if that was the
+      problem, then Resubmit to send just this bill back for a fresh IBFT attempt. The exported Bill ID gets a retry
+      marker (e.g. E123-A-1).
+    </p>
+    <div class="table-wrap">
+      <table id="needsCorrectionTable">
+        <thead><tr><th>Bill ID</th><th>Isolated From</th><th>Failed On</th><th>Reason</th><th>Beneficiary</th><th>FBR Section</th><th>IBAN</th><th class="num">Net Amount</th><th></th></tr></thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Older Failed Bulk Lines <span class="pill Cancelled">Legacy</span></h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Only beneficiaries marked Failed before isolation existed appear here. Resubmitting one of these is per-line as
+      before; new failures are isolated into their own bill above instead.
+    </p>
+    <div class="table-wrap">
+      <table id="failedBulkLinesTable">
+        <thead><tr><th>Line ID</th><th>Parent Bill</th><th>Failed On</th><th>Reason</th><th>Beneficiary</th><th>FBR Section</th><th>IBAN</th><th class="num">Net Amount</th><th></th></tr></thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card" id="pc_fbrAdjustCard">
+    <h3>FBR Tax Adjustments <span class="pill Processed">from Redirected Bills</span></h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      When a Paid bill is redirected to the correct beneficiary (Admin &gt; Redirect a Paid Bill), the Income Tax
+      already withheld/deposited under the WRONG beneficiary's name is tracked here instead of being credited to
+      them. "Not Yet Deposited" - adjust the amount you actually deposit under that name with FBR. "Deposited" -
+      adjust it against that beneficiary's own upcoming bills. Record however much you've reconciled each time;
+      partial amounts are fine.
+    </p>
+    <button class="secondary" onclick="loadFBRTaxAdjustments()">Load</button>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="fbrAdjustTable">
+        <thead><tr><th>Wrong Beneficiary</th><th>Original Bill</th><th>Redirected To</th><th class="num">Tax Amount</th><th class="num">Adjusted So Far</th><th class="num">Remaining</th><th>Deposit Status</th><th></th></tr></thead>
+        <tbody><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Click Load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="editBeneficiaryModal" style="display:none; position:fixed; inset:0; background:#0007; align-items:center; justify-content:center; z-index:105; padding:16px;">
+    <div class="card" style="background:var(--navy-light); max-width:480px; width:100%; margin:0;">
+      <h3 style="margin-top:0;">Edit Beneficiary - <span id="eb_billId" style="color:var(--accent);"></span></h3>
+      <div class="field"><label>Name</label><input type="text" id="eb_name"></div>
+      <div class="field"><label>IBAN</label><input type="text" id="eb_iban"></div>
+      <div class="field"><label>CNIC / NTN</label><input type="text" id="eb_cnic"></div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <button class="primary" style="flex:1;" onclick="saveAndResubmit()">Save &amp; Resubmit</button>
+        <button class="secondary" style="flex:1;" onclick="saveBeneficiaryOnly()">Save Only</button>
+        <button class="secondary" style="flex:1;" onclick="document.getElementById('editBeneficiaryModal').style.display='none'">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>

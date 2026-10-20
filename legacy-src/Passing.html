@@ -1,0 +1,28 @@
+<!-- STAGE 3 (renamed from "Approval" to "Passing" - the status word Passed was
+     already correct in the data, only this label was wrong) -->
+<div id="tab-passing" class="tabpanel">
+  <div class="card">
+    <h3>Stage 3 - Mark as Passed <span class="pill Processed">from Processed</span></h3>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>Financial Year</label><select id="pass_fy" onchange="loadStageTable('Processed','passingTable','pass_fy')"></select></div>
+      <div class="field" style="align-self:flex-end; flex:2;">
+        <button class="secondary" onclick="loadStageTable('Processed','passingTable','pass_fy')">Refresh</button>
+        <button class="primary" id="btnPass" onclick="doStageAction('passing')">Mark Selected as Passed</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Bill ID contains</label><input type="text" id="pass_fid" oninput="filterStageTable('passingTable','pass')"></div>
+      <div class="field"><label>Vendor/Name contains</label><input type="text" id="pass_fname" oninput="filterStageTable('passingTable','pass')"></div>
+      <div class="field"><label>Description contains</label><input type="text" id="pass_fdesc" oninput="filterStageTable('passingTable','pass')"></div>
+      <div class="field"><label>Amount contains</label><input type="text" id="pass_famt" oninput="filterStageTable('passingTable','pass')"></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="passingTable">
+        <thead><tr><th></th><th>Bill ID</th><th>Date</th><th>Campus</th><th>Bill Description</th><th class="num">Gross</th>
+          <th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Security</th><th class="num">Penalty</th><th class="num">Other Deduction</th>
+          <th class="num">Net Amount</th><th>Vendor</th><th>Processed By</th><th>Processed Date</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>

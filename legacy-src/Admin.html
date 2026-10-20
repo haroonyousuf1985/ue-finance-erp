@@ -1,0 +1,474 @@
+<!-- ADMIN -->
+<div id="tab-admin" class="tabpanel">
+  <div class="no-print" style="position:sticky;top:100px;z-index:35;background:var(--bg);padding:10px 0 8px;margin:-4px 0 12px;border-bottom:1px solid var(--border);">
+    <div class="row" style="align-items:center;gap:8px;">
+      <label style="margin:0;white-space:nowrap;">Jump to:</label>
+      <select id="adminQuickNav" onchange="scrollToAdminSection(this.value)" style="max-width:360px;">
+        <option value="">-- Select a section --</option>
+        <optgroup label="Setup & Records">
+          <option value="adm-alloc">Add / Assign Budget Code</option>
+          <option value="adm-heads">Budget Heads</option>
+          <option value="adm-users">Add User</option>
+          <option value="adm-taxsettings">Tax Settings</option>
+          <option value="adm-employees">Employees (UE)</option>
+          <option value="adm-nonue">Non-UE Employees, Vendors & Students</option>
+          <option value="adm-bankaccounts">Bank Accounts (Pay From)</option>
+          <option value="adm-offices">Receiving Offices</option>
+        </optgroup>
+        <optgroup label="Bill Management">
+          <option value="adm-manageentries">Manage Entries (Edit / Delete)</option>
+          <option value="adm-pipeline">Pipeline Overview</option>
+          <option value="adm-syscheck">System Check</option>
+        </optgroup>
+        <optgroup label="Section 149 Tools">
+          <option value="adm-s149cancel">Cancelled-Bill Income Threshold Repair</option>
+          <option value="adm-s149paid">Already-Paid Over/Under-Deductions</option>
+          <option value="adm-s149tds">Tax Deduction Statement</option>
+          <option value="adm-s149balances">Outstanding Credit Balances</option>
+          <option value="adm-s149manual">Manual Income Inclusion Override</option>
+          <option value="adm-s149redirect">Redirect a Paid Bill</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+  <div class="card" id="adm-alloc">
+    <h3>Add / Assign Budget Code to Campus (with allocation)</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Pick existing campus/code, or type new ones - creating and allocating happens in one Save.</p>
+    <div class="row">
+      <div class="field"><label>Existing Campus</label><select id="a_campus"><option value="">-- select --</option></select></div>
+      <div class="field"><label>...or New Campus Name</label><input type="text" id="a_newcampus" placeholder="Leave blank if selecting above"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Budget Code</label><input type="text" id="a_headcode" placeholder="e.g. B-101" onblur="onAdminCodeBlur()"></div>
+      <div class="field"><label>Budget Head Name</label><input type="text" id="a_headname" placeholder="Auto-fills if code exists"></div>
+      <div class="field"><label>Financial Year</label><select id="a_fy"></select></div>
+      <div class="field"><label>Allocated Amount</label><input type="number" id="a_amount"></div>
+    </div>
+    <button class="primary" id="btnSaveAlloc" onclick="saveAllocationForm()">Save</button>
+
+    <h3 style="margin-top:18px;font-size:13px;">Search Allocations</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Doesn't load everything by default - pick filters and click Load.</p>
+    <div class="row">
+      <div class="field"><label>Campus</label><select id="alloc_campus"><option value="">All Campuses</option></select></div>
+      <div class="field"><label>Financial Year</label><select id="alloc_fy"></select></div>
+      <div class="field"><label>Budget Code/Name contains</label><input type="text" id="alloc_query"></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLoadAlloc" onclick="loadAllocations()">Load</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="allocTable"><thead><tr><th>Campus</th><th>Code</th><th>Head</th><th>FY</th><th class="num">Allocated</th><th></th></tr></thead>
+        <tbody><tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-heads">
+    <h3>Budget Heads</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Edit a head's code/name, or deactivate one so it stops appearing in new allocations/bills (existing records referencing it keep working).</p>
+    <div class="row">
+      <div class="field"><label>Search Budget Heads</label><input type="text" id="bh_query" placeholder="Code or name"></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLoadHeads" onclick="loadBudgetHeadsAdmin()">Load</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="headsTable"><thead><tr><th>Code</th><th>Name</th><th></th></tr></thead>
+        <tbody><tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Click Load to search.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-users">
+    <h3>Add User</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      <b>Admin</b>: every tab. <b>All Except Admin</b>: every tab (New Entry, Processing, Passing, Payment/IBFT, Paid Bills, Reports) except the Admin tab.
+      <b>Accounts</b>: New Entry + Paid Bills + Reports. <b>RA</b>: Passing + Reports only.
+      <b>IBFT User</b>: Payment/IBFT + Paid Bills + Reports only. <b>Reports Only</b>: Reports only.
+      <b>Diary Clerk</b>: Diary tab + Reports (Diary Report only) - logs a bill/letter's physical arrival and assigns it by name; cannot enter bills and cannot see any other tab. <b>Every role</b> has the Diary tab.
+    </p>
+    <div class="row">
+      <div class="field"><label>Username</label><input id="u_username"></div>
+      <div class="field"><label>Password</label><input id="u_password" type="password"></div>
+      <div class="field"><label>Full Name</label><input id="u_fullname"></div>
+      <div class="field"><label>Role</label><select id="u_role">
+        <option value="Accounts">Accounts (Entry + Paid Bills + Reports)</option>
+        <option value="RA">RA (Passing + Reports)</option>
+        <option value="IBFT">IBFT User (Payment/IBFT + Paid Bills + Reports)</option>
+        <option value="ReportsOnly">Reports Only</option>
+        <option value="DiaryClerk">Diary Clerk (Diary + Diary Report only)</option>
+        <option value="AllExceptAdmin">All Except Admin (every tab except Admin)</option>
+        <option value="Admin">Admin (full access)</option>
+      </select></div>
+    </div>
+    <button class="primary" id="btnAddUser" onclick="addUserForm()">Add User</button>
+    <div class="table-wrap" style="margin-top:14px;">
+      <table id="userTable"><thead><tr><th>Username</th><th>Full Name</th><th>Role</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-taxsettings">
+    <h3>Tax Settings</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Every rate below is yours to change - nothing here is fixed by the system. "Inclusive" treats the Gross Amount
+      as already containing the tax (tax = Gross&divide;(1+Rate)&times;Rate, the same approach already used for
+      General Sales Tax's Active/Filer rate); "Exclusive" adds the tax as a straight percentage on top
+      (tax = Gross&times;Rate).
+    </p>
+
+    <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">General Sales Tax (Goods, Section 153)</h4>
+    <div class="row">
+      <div class="field"><label>Active / Filer Rate (%)</label><input type="number" step="0.01" id="ts_stActive"></div>
+      <div class="field"><label>Inactive / Non-Filer Rate (%)</label><input type="number" step="0.01" id="ts_stInactive"></div>
+    </div>
+    <p style="font-size:11.5px;color:var(--text-muted);margin-top:-6px;">
+      Active/Filer always uses the Inclusive approach with the standard 1/5th-withholding rule; Inactive/Non-Filer
+      is always a straight Exclusive percentage of Gross. Only the rate itself is editable for these two, to avoid
+      accidentally changing that specific FBR compliance rule.
+    </p>
+
+    <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Punjab Sales Tax (Services)</h4>
+    <div class="row">
+      <div class="field"><label>Active / Registered Taxpayer Rate (%)</label><input type="number" step="0.01" id="ts_active"></div>
+      <div class="field"><label>Calculation - Active</label><select id="ts_activeMode"><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></div>
+      <div class="field"><label>Inactive Taxpayer Rate (%)</label><input type="number" step="0.01" id="ts_inactive"></div>
+      <div class="field"><label>Calculation - Inactive</label><select id="ts_inactiveMode"><option value="exclusive">Exclusive</option><option value="inclusive">Inclusive</option></select></div>
+    </div>
+
+    <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Punjab Sales Tax - Execution of Contract</h4>
+    <p style="font-size:11.5px;color:var(--text-muted);margin-top:-6px;">Applies only to Vendor bills with Nature of Bill = "Execution of Contract", by category.</p>
+    <div class="row">
+      <div class="field"><label>New Projects Rate (%)</label><input type="number" step="0.01" id="ts_contractNew"></div>
+      <div class="field"><label>Calculation - New Projects</label><select id="ts_contractNewMode"><option value="inclusive">Inclusive</option><option value="exclusive">Exclusive</option></select></div>
+      <div class="field"><label>Repair / Renovation Rate (%)</label><input type="number" step="0.01" id="ts_contractRepair"></div>
+      <div class="field"><label>Calculation - Repair/Renovation</label><select id="ts_contractRepairMode"><option value="inclusive">Inclusive</option><option value="exclusive">Exclusive</option></select></div>
+    </div>
+
+    <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Income Tax</h4>
+    <div class="row">
+      <div class="field"><label>Section 156 Rate - Honoraria to Statutory Body Meeting's Member (%)</label><input type="number" step="0.01" id="ts_section156"></div>
+      <div class="field"><label>Section 153(1)(b) - Non-UE, Active/Registered (%)</label><input type="number" step="0.01" id="ts_1531bActive"></div>
+      <div class="field"><label>Section 153(1)(b) - Non-UE, Inactive (%)</label><input type="number" step="0.01" id="ts_1531bInactive"></div>
+    </div>
+    <p style="font-size:11.5px;color:var(--text-muted);margin-top:-6px;">
+      Section 149 (salary slabs), Section 153(1)(a) Supply, and Section 153(1)(c) Contract Income Tax use fixed
+      Company/Individual x Filer/Non-Filer rate tables built into the system, and Section 149's slabs are edited
+      separately below.
+    </p>
+    <button class="primary" id="btnSaveTaxSettings" onclick="saveTaxSettingsForm()" style="margin-top:10px;">Save Tax Settings</button>
+
+    <h3 style="margin-top:18px;font-size:13px;">Section 149 Salary Tax Slabs</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Used for UE/Non-UE Employee bills. Threshold = income where the bracket starts; Fixed Amount = tax already
+      accumulated by that threshold; Rate = marginal % on the amount above it. Edit any row below and click Save,
+      or add a new one - revise these whenever the slabs change.
+    </p>
+    <div class="row">
+      <div class="field"><label>Threshold</label><input type="number" id="slab_threshold"></div>
+      <div class="field"><label>Fixed Amount</label><input type="number" id="slab_fixed"></div>
+      <div class="field"><label>Rate %</label><input type="number" step="0.01" id="slab_rate"></div>
+      <div class="field"><label>Label</label><input type="text" id="slab_label"></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnSaveSlab" onclick="saveSlabForm()">Save Slab</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="slabsTable"><thead><tr><th class="num">Threshold</th><th class="num">Fixed Amount</th><th class="num">Rate</th><th>Label</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-employees">
+    <h3>Employees (UE)</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Register UE Employees here so their details auto-fill in New Entry via Employee ID. Only Admin can add a new UE Employee - there is no provision to add one from the Entry form.</p>
+    <div class="row">
+      <div class="field"><label>Employee ID</label><input id="emp_id"></div>
+      <div class="field"><label>Name</label><input id="emp_name"></div>
+      <div class="field"><label>CNIC</label><input id="emp_cnic" maxlength="15" placeholder="35201-1222334-4"></div>
+      <div class="field"><label>IBAN</label><input id="emp_iban"></div>
+      <div class="field"><label>Bank Name</label><input id="emp_bank"></div>
+      <div class="field"><label>Department</label><input id="emp_dept"></div>
+      <div class="field"><label>Designation</label><input id="emp_designation"></div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Annual Taxable Income (for Section 149)</label><input type="number" id="emp_annualincome"></div>
+      <div class="field"><label>Financial Year</label><select id="emp_fy"></select></div>
+    </div>
+    <button class="primary" id="btnAddEmployee" onclick="addEmployeeForm()">Save Employee</button>
+
+    <div class="row" style="margin-top:12px;">
+      <div class="field"><label>Search Employees</label><input type="text" id="emp_query" placeholder="Name or ID"></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLoadEmployees" onclick="loadEmployeesAdmin()">Load</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="employeeTable"><thead><tr><th>ID</th><th>Name</th><th>CNIC</th><th>IBAN</th><th>Bank</th><th>Department</th><th>Designation</th></tr></thead>
+        <tbody><tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Click Load to search.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-nonue">
+    <h3>Non-UE Employees, Vendors & Students</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">These self-register the first time they're billed - this is a read-only search/browse view, doesn't load everything by default.</p>
+    <div class="row">
+      <div class="field"><label>Search Non-UE Employees</label><input type="text" id="nonue_query" placeholder="Name or CNIC"></div>
+      <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadNonUEAdmin()">Load</button></div>
+    </div>
+    <div class="table-wrap"><table id="nonueTable"><thead><tr><th>CNIC</th><th>Name</th><th>IBAN</th><th>Bank</th></tr></thead>
+      <tbody><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Click Load to search.</td></tr></tbody></table></div>
+
+    <div class="row" style="margin-top:12px;">
+      <div class="field"><label>Search Vendors</label><input type="text" id="vendor_query" placeholder="Name or CNIC/NTN"></div>
+      <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadVendorsAdmin()">Load</button></div>
+    </div>
+    <div class="table-wrap"><table id="vendorsAdminTable"><thead><tr><th>Vendor Name</th><th>CNIC/NTN</th><th>IBAN</th><th>Bank</th></tr></thead>
+      <tbody><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Click Load to search.</td></tr></tbody></table></div>
+
+    <div class="row" style="margin-top:12px;">
+      <div class="field"><label>Search Students</label><input type="text" id="student_query" placeholder="Name or Student ID"></div>
+      <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadStudentsAdmin()">Load</button></div>
+    </div>
+    <div class="table-wrap"><table id="studentsAdminTable"><thead><tr><th>Student ID</th><th>Name</th><th>CNIC</th><th>IBAN</th><th>Program</th><th>Session</th><th>Shift</th></tr></thead>
+      <tbody><tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Click Load to search.</td></tr></tbody></table></div>
+  </div>
+
+  <div class="card" id="adm-bankaccounts">
+    <h3>Bank Accounts (Pay From)</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">These are the organization's own accounts a bill can be paid from - every New Entry must pick one. The list below doesn't load automatically - click Load to view/manage it.</p>
+    <div class="row">
+      <div class="field"><label>Account Title</label><input type="text" id="ba_title"></div>
+      <div class="field"><label>Bank Name</label><input type="text" id="ba_bank"></div>
+      <div class="field"><label>Account Number / IBAN</label><input type="text" id="ba_number"></div>
+      <div class="field" style="align-self:flex-end;">
+        <button class="primary" id="btnAddBankAccount" onclick="addBankAccountForm()">Add Account</button>
+        <button class="secondary" id="btnLoadBankAccounts" onclick="loadBankAccountsAdminTable()">Load</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="bankAccountsTable"><thead><tr><th>Account Title</th><th>Bank</th><th>Account No.</th><th></th></tr></thead>
+        <tbody><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Click Load to view accounts.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-offices">
+    <h3>Receiving Offices</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Selected first thing on every New Entry - purely informational, has no effect on budget anywhere, and only reappears on the IBFT Payment Batch CSV download. The list below doesn't load automatically - click Load to view/manage it.</p>
+    <div class="row">
+      <div class="field"><label>Office Name</label><input type="text" id="of_name"></div>
+      <div class="field" style="align-self:flex-end;">
+        <button class="primary" id="btnAddOffice" onclick="addOfficeForm()">Add Office</button>
+        <button class="secondary" id="btnLoadOffices" onclick="loadReceivingOfficesAdminTable()">Load</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="officesTable"><thead><tr><th>Office Name</th><th></th></tr></thead>
+        <tbody><tr><td colspan="2" style="text-align:center;color:var(--text-muted);">Click Load to view offices.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-manageentries">
+    <h3>Manage Entries (Edit / Delete)</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Edit or Delete only work on a bill still at <b>Received</b> status - once it moves to Processed/Passed/Paid, someone
+      downstream has already acted on it. A bill at any later stage (including Paid) can instead be <b>Cancelled</b> -
+      its record stays for audit, but it's excluded from every budget, consumption, and payment calculation from that
+      point on, exactly as if it never happened financially. Deleting is permanent and has no audit trail; Cancelling
+      always keeps one.
+    </p>
+    <div class="row">
+      <div class="field" style="max-width:160px;"><label>Bill ID contains</label><input type="text" id="me_billid"></div>
+      <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="me_fy"></select></div>
+      <div class="field"><label>Status</label>
+        <select id="me_status"><option value="Received" selected>Received</option><option value="">All</option><option>Processed</option><option>Passed</option><option>Paid</option><option>Cancelled</option></select>
+      </div>
+      <div class="field"><label>Vendor/Name contains</label><input type="text" id="me_vendor"></div>
+      <div class="field"><label>Description contains</label><input type="text" id="me_description"></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLoadManageEntries" onclick="loadManageEntries()">Load</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="manageEntriesTable"><thead><tr><th>Bill ID</th><th>Date</th><th>Campus</th><th>Vendor/Payee</th><th>Description</th><th class="num">Amount</th><th>Status</th><th>Entered By</th><th></th></tr></thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--text-muted);">Set filters above and click Load.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-pipeline">
+    <h3>Pipeline Overview</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Live count of bills sitting in each stage for the selected year - the fastest way to spot bills that are stuck.</p>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>Financial Year</label><select id="admin_fy" onchange="loadPipelineCounts()"></select></div>
+    </div>
+    <div class="balance-box" id="pipelineBox"></div>
+  </div>
+
+  <div class="card" id="adm-syscheck">
+    <h3>System Check</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Confirms every sheet exists with the right columns, and flags any bill whose Status doesn't cleanly match Received/Processed/Passed/Paid (a common reason bills seem to "disappear" between stages) - run this any time something looks off.</p>
+    <button class="secondary" id="btnSysCheck" onclick="runSystemCheck()">Run Check</button>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="sysCheckTable"><thead><tr><th>Sheet</th><th>Status</th><th>Rows</th><th>Details</th></tr></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-s149cancel">
+    <h3>Section 149: Cancelled-Bill Income Threshold Repair</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      A Cancelled UE/Non-UE Employee bill is now correctly excluded from that person's annual Section 149 threshold going
+      forward - but any bill saved <b>before</b> that fix, while still not yet Paid, may have Income Tax calculated against
+      an inflated threshold because a since-cancelled bill was still being counted. <b>Preview</b> shows exactly what would
+      change without touching anything; <b>Apply Fix</b> then writes the corrected Income Tax/Net Amount to those bills.
+      Only Received/Processed/Passed bills are ever touched - Paid bills are never rewritten. Covers single-entry bills
+      AND bulk-uploaded UE Employee lines (addressed by their own "ParentID-LineNo" ID, e.g. E1042-3) - a Non-UE bulk
+      line still can't be safely auto-corrected (no record survives of which tax method/affidavit status was used per
+      line) and is listed separately below for manual review; use Manual Income Inclusion Override further down, or
+      cancel and re-upload the bulk bill, to fix those.
+    </p>
+    <button class="secondary" id="btnPreview149" onclick="previewSection149Repair()">Preview</button>
+    <button class="primary" id="btnApply149" onclick="applySection149Repair()" style="display:none;">Apply Fix</button>
+    <div id="s149RepairSummary" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="s149FixTable"><thead><tr><th>Bill ID</th><th>Payee</th><th>FY</th><th class="num">Gross</th><th class="num">Old Income Tax</th><th class="num">Corrected Income Tax</th><th class="num">Difference</th><th class="num">Old Net</th><th class="num">Corrected Net</th></tr></thead>
+        <tbody><tr><td colspan="9" style="text-align:center;color:var(--text-muted);">Click Preview to check.</td></tr></tbody></table>
+    </div>
+    <div class="table-wrap" style="margin-top:14px;display:none;" id="s149BulkFlagWrap">
+      <table id="s149BulkFlagTable"><thead><tr><th colspan="5" style="text-align:left;font-weight:800;">Bulk lines needing manual review</th></tr><tr><th>Bulk Bill ID</th><th>Beneficiary</th><th>Payee Type</th><th>FY</th><th class="num">Current Income Tax</th></tr></thead>
+        <tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-s149paid">
+    <h3>Section 149: Already-Paid Over/Under-Deductions (Credit / Outstanding)</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      For a bill that's already <b>Paid</b>, the money has moved - its own Income Tax figure is never rewritten. This
+      is computed <b>cumulatively per employee</b>, not bill-by-bill: every not-yet-reconciled Paid Section 149
+      transaction of theirs is combined into one holistic total actually withheld vs one total that should have been
+      withheld (given their full, correctly-excluding-cancelled-bills history) - the difference becomes either a
+      <b>credit</b> (owed back to them, automatically knocked off their next Section 149 transaction) or, in the rare
+      mirror-image case, an <b>outstanding</b> amount (still owed by them, automatically collected on their next
+      transaction). No further action is needed after Apply here. Covers single-entry bills AND Paid bulk-uploaded UE
+      Employee lines (addressed by their own "ParentID-LineNo" ID) - a Non-UE bulk line still needs Manual Income
+      Inclusion Override below.
+    </p>
+    <button class="secondary" id="btnPreview149Paid" onclick="previewSection149PaidCredit()">Preview</button>
+    <button class="primary" id="btnApply149Paid" onclick="applySection149PaidCredit()" style="display:none;">Apply</button>
+    <div id="s149PaidSummary" style="margin-top:10px;font-size:13px;color:var(--text-muted);"></div>
+    <div id="s149PaidEmployees" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="card" id="adm-s149tds">
+    <h3>Section 149: Tax Deduction Statement</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      A complete, auditable justification of every rupee of Income Tax on record for one UE/Non-UE Employee in one FY -
+      every transaction, chronologically, with the FBR section applied, and for a Section 149 slab transaction, exactly
+      which bracket(s) its amount fell into and the rate applied to each portion. Any credit applied, and the running
+      annual income before/after each transaction, are shown too - downloadable as CSV or PDF.
+    </p>
+    <div class="row">
+      <div class="field" style="max-width:200px;">
+        <label>Payee Type</label>
+        <select id="tds_payeeType" onchange="onTdsPayeeTypeChange('admin')">
+          <option value="Employee">UE Employee</option>
+          <option value="NonUEEmployee">Non-UE Employee</option>
+        </select>
+      </div>
+      <div class="field"><label id="tds_keyLabel">Employee ID</label><input type="text" id="tds_key"></div>
+      <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="tds_fy"></select></div>
+      <div class="field" style="align-self:flex-end;">
+        <button class="primary" onclick="generateTaxDeductionStatement('admin')">Generate</button>
+        <button class="secondary" id="btnTdsCsv" onclick="downloadTdsCSV('admin')" style="display:none;">Download CSV</button>
+        <button class="secondary" id="btnTdsPdf" onclick="downloadTdsPDF('admin')" style="display:none;">Download PDF</button>
+      </div>
+    </div>
+    <div id="tdsResult" style="margin-top:14px;"></div>
+  </div>
+
+  <div class="card" id="adm-s149balances">
+    <h3>Section 149: Outstanding Credit Balances</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">Every employee currently owed money via reduced future Income Tax withholding - doesn't load automatically, click Load.</p>
+    <button class="secondary" id="btnLoadS149Credits" onclick="loadSection149CreditBalances()">Load</button>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="s149CreditsTable"><thead><tr><th>Employee/CNIC</th><th>Payee Type</th><th>FY</th><th class="num">Balance</th><th>Last Updated</th></tr></thead>
+        <tbody><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Click Load to view.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-s149manual">
+    <h3>Section 149: Manual Income Inclusion Override</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Full manual control over which bills/lines count toward a specific person's Section 149 annual income for a given
+      FY - the direct fallback for anything the tools above can't safely judge on their own, chiefly a bulk Non-UE
+      Employee line. Every taxable bill and bulk line for that person in that FY is listed, across every status,
+      including ones already excluded automatically (Cancelled, Redirected - shown greyed out with the reason, since a
+      manual override on top of those has no effect). Untick "Included" on any item to manually exclude it from that
+      person's threshold calculation from now on - re-tick to bring it back in. This does not rewrite any bill's own
+      Income Tax figure; it only changes what future bills for this person are calculated against.
+    </p>
+    <div class="row">
+      <div class="field" style="max-width:200px;">
+        <label>Payee Type</label>
+        <select id="mio_payeeType" onchange="onManualOverridePayeeTypeChange()">
+          <option value="Employee">UE Employee</option>
+          <option value="NonUEEmployee">Non-UE Employee</option>
+        </select>
+      </div>
+      <div class="field"><label id="mio_keyLabel">Employee ID</label><input type="text" id="mio_key"></div>
+      <div class="field" style="max-width:200px;"><label>Financial Year</label><select id="mio_fy"></select></div>
+      <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadManualOverrideItems()">Load</button></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="mioTable"><thead><tr><th>Bill/Line ID</th><th>Date</th><th>Nature</th><th class="num">Amount</th><th class="num">Income Tax</th><th>Status</th><th>Included in Threshold?</th></tr></thead>
+        <tbody><tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Set Payee Type/ID/FY above and click Load.</td></tr></tbody></table>
+    </div>
+  </div>
+
+  <div class="card" id="adm-s149redirect">
+    <h3>Section 149: Redirect a Paid Bill to the Correct Beneficiary</h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Use this when a Section 149 UE/Non-UE Employee bill was <b>Paid to the wrong person by mistake</b> - either a normal
+      single-entry bill, or one beneficiary inside a bulk-uploaded bill (enter that beneficiary's own ID, e.g.
+      <b>E1042-2</b> for the 2nd line of bulk bill E1042 - only that one beneficiary is affected, every other beneficiary
+      in the same bulk bill is left completely untouched). A bulk Non-UE Employee line isn't supported here (it doesn't
+      retain enough information to redirect safely) - correct one of those manually instead. This does four things
+      together: (1) excludes the original payment, so it's out of every calculation from now on - including the wrong
+      beneficiary's own annual income for future bills; (2) credits the wrong beneficiary with the Income Tax already
+      withheld/deposited under their name on that bill, so it's drawn down automatically on their next real bill; (3)
+      creates a brand-new bill for the correct beneficiary, same Gross Amount, with Income Tax freshly calculated
+      against <b>their own</b> annual threshold - it then goes through Processing/Passing/Payment normally, since the
+      actual transfer to them hasn't happened yet; (4) links both records so either one's Bill Audit View shows the
+      other. This does <b>not</b> reverse the money already sent to the wrong beneficiary's bank account - that
+      recovery, if any, happens outside this system.
+    </p>
+    <div class="row">
+      <div class="field"><label>Original (Wrongly-Paid) Bill ID</label><input type="text" id="rd_billid" placeholder="e.g. E1042, or E1042-1 / E1042-2 for one beneficiary inside a bulk bill"></div>
+      <div class="field" style="align-self:flex-end;"><button class="secondary" onclick="loadBillForRedirect()">Load Bill</button></div>
+    </div>
+    <div id="rd_originalInfo" style="display:none;margin:10px 0;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:13px;"></div>
+
+    <div id="rd_correctSection" style="display:none;">
+      <h4 style="margin:14px 0 6px;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em;">Correct Beneficiary</h4>
+      <div class="row" style="align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="rdPayeeType" value="Employee" checked onchange="onRedirectPayeeTypeChange()" style="width:auto;"> UE Employee</label>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;"><input type="radio" name="rdPayeeType" value="NonUEEmployee" onchange="onRedirectPayeeTypeChange()" style="width:auto;"> Non-UE Employee</label>
+      </div>
+      <div class="row" id="rd_ueFields">
+        <div class="field"><label>Employee ID</label><input type="text" id="rd_employeeid" oninput="onRedirectEmployeeIdInput()"></div>
+        <div class="field"><label>Name (auto)</label><input type="text" id="rd_empname" readonly></div>
+      </div>
+      <div class="row" id="rd_nonueFields" style="display:none;">
+        <div class="field"><label>CNIC</label><input type="text" id="rd_cnic" placeholder="35201-1222334-4" maxlength="15"></div>
+        <div class="field"><label>Name</label><input type="text" id="rd_name"></div>
+        <div class="field"><label>IBAN</label><input type="text" id="rd_iban"></div>
+        <div class="field"><label>Bank Name</label><input type="text" id="rd_bank"></div>
+      </div>
+      <div class="row" id="rd_nonueTaxFields" style="display:none;align-items:center;">
+        <div class="field">
+          <label>Tax Method</label>
+          <select id="rd_nonueTaxMethod" onchange="onRedirectTaxMethodChange()">
+            <option value="Section149">Section 149 (Slab, per Income Profile / Affidavit)</option>
+            <option value="Section153_1b">Section 153(1)(b) - Services (Individual/AOP) - flat rate</option>
+          </select>
+        </div>
+        <div class="field" id="rd_affidavitWrap"><label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:26px;"><input type="checkbox" id="rd_affidavit" style="width:auto;"> Affidavit of Low Income (Section 149 only - zero tax)</label></div>
+        <div class="field" id="rd_taxpayerStatusWrap" style="display:none;">
+          <label>Taxpayer Status</label>
+          <select id="rd_taxpayerStatus">
+            <option value="Filer">Active / Registered</option>
+            <option value="NonFiler">Inactive</option>
+          </select>
+        </div>
+      </div>
+      <button class="secondary" id="btnPreviewRedirect" onclick="previewRedirect()">Preview Redirect</button>
+      <div id="rd_previewResult" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:8px;font-size:13px;"></div>
+      <button class="primary" id="btnApplyRedirect" onclick="applyRedirect()" style="display:none;margin-top:10px;">Confirm - Redirect Payment</button>
+    </div>
+  </div>
+</div>

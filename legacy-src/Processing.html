@@ -1,0 +1,27 @@
+<!-- STAGE 2 -->
+<div id="tab-processing" class="tabpanel">
+  <div class="card">
+    <h3>Stage 2 - Mark as Processed <span class="pill Received">from Received</span></h3>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>Financial Year</label><select id="proc_fy" onchange="loadStageTable('Received','processingTable','proc_fy')"></select></div>
+      <div class="field" style="align-self:flex-end; flex:2;">
+        <button class="secondary" onclick="loadStageTable('Received','processingTable','proc_fy')">Refresh</button>
+        <button class="primary" id="btnProcess" onclick="doStageAction('processing')">Mark Selected as Processed</button>
+      </div>
+    </div>
+    <div class="row">
+      <div class="field"><label>Bill ID contains</label><input type="text" id="proc_fid" oninput="filterStageTable('processingTable','proc')"></div>
+      <div class="field"><label>Vendor/Name contains</label><input type="text" id="proc_fname" oninput="filterStageTable('processingTable','proc')"></div>
+      <div class="field"><label>Description contains</label><input type="text" id="proc_fdesc" oninput="filterStageTable('processingTable','proc')"></div>
+      <div class="field"><label>Amount contains</label><input type="text" id="proc_famt" oninput="filterStageTable('processingTable','proc')"></div>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="processingTable">
+        <thead><tr><th></th><th>Bill ID</th><th>Date</th><th>Campus</th><th>Bill Description</th><th class="num">Gross</th>
+          <th class="num">Income Tax</th><th class="num">Sales Tax</th><th class="num">Punjab Sales Tax</th><th class="num">Security</th><th class="num">Penalty</th><th class="num">Other Deduction</th>
+          <th class="num">Net Amount</th><th>Vendor</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</div>

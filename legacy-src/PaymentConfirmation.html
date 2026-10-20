@@ -1,0 +1,37 @@
+<!-- CONFIRMATION - splits "IBFT file generated" from "money actually moved".
+     A bill (or, for a Bulk bill, each beneficiary LINE independently) lands here once IBFT is
+     generated. Marking a bulk line Failed ISOLATES it into its own new bill (E123-A, -B ...),
+     which goes to Reconciliation; the rest of the bulk bill is unaffected and confirms normally.
+     Does NOT auto-load - click Load, tick the FEW that bounced, "Mark Selected as Failed",
+     then "Confirm All Remaining". -->
+<div id="tab-paymentconfirm" class="tabpanel">
+  <div class="card no-print">
+    <h3>Confirmation <span class="pill Paid">from Payment/IBFT</span></h3>
+    <p style="font-size:12.5px;color:var(--text-muted);">
+      Generating the IBFT batch only means the file was sent to the bank - it does not mean the money moved. Load the
+      list, tick the few that actually bounced and mark them Failed, then confirm everything else in one go. A bounced
+      bulk beneficiary is separated into its own new bill (e.g. E123-A) and moves to Reconciliation; the rest of the
+      bulk bill is not affected.
+    </p>
+    <div class="row">
+      <div class="field" style="max-width:220px;"><label>Financial Year</label><select id="pc_fy"></select></div>
+      <div class="field" style="align-self:flex-end;"><button class="primary" id="btnLoadPaymentConfirm" onclick="loadPaymentConfirmQueue()">Load</button></div>
+    </div>
+    <div class="row" id="pc_filterRow" style="display:none;">
+      <div class="field"><label>Bill ID contains</label><input type="text" id="pc_fBillId" oninput="filterPaymentConfirmQueue()"></div>
+      <div class="field"><label>Batch contains</label><input type="text" id="pc_fBatch" oninput="filterPaymentConfirmQueue()"></div>
+      <div class="field"><label>Beneficiary Name contains</label><input type="text" id="pc_fBeneficiary" oninput="filterPaymentConfirmQueue()"></div>
+    </div>
+    <div class="row" id="pc_actionRow" style="display:none;align-items:center;">
+      <button class="secondary" style="color:var(--danger);" onclick="markSelectedPaymentsFailed()">Mark Selected as Failed</button>
+      <button class="primary" onclick="confirmAllRemainingPayments()">Confirm All Remaining</button>
+      <span id="pc_countLabel" style="font-size:12.5px;color:var(--text-muted);"></span>
+    </div>
+    <div class="table-wrap" style="margin-top:10px;">
+      <table id="pcQueueTable">
+        <thead><tr><th></th><th>Bill / Line ID</th><th>IBFT Submitted</th><th>Batch</th><th>Beneficiary</th><th>FBR Section</th><th>IBAN</th><th class="num">Net Amount</th></tr></thead>
+        <tbody><tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Set the Financial Year above and click Load.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
